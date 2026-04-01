@@ -2,13 +2,13 @@ package dev.hyprconnect.app.ui.device
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cast
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -23,9 +23,18 @@ fun DeviceDetailScreen(
     onNavigateToFileTransfer: () -> Unit
 ) {
     val device by viewModel.device.collectAsState()
+    val workspaces by viewModel.workspaces.collectAsState()
+    val isWorkspaceLoading by viewModel.isWorkspaceLoading.collectAsState()
+    val workspaceActionError by viewModel.workspaceActionError.collectAsState()
 
     LaunchedEffect(deviceId) {
         viewModel.loadDevice(deviceId)
+    }
+
+    LaunchedEffect(device?.status) {
+        if (device?.status is DeviceStatus.Connected) {
+            viewModel.loadWorkspaces()
+        }
     }
 
     Scaffold(
@@ -59,42 +68,87 @@ fun DeviceDetailScreen(
                     }
                 }
 
-                item {
-                    Text("Quick Actions", style = MaterialTheme.typography.titleMedium)
-                }
+                val plugins = dev.availablePlugins
 
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ActionCard(
-                            icon = Icons.Default.Share,
-                            label = "Send File",
-                            modifier = Modifier.weight(1f),
-                            onClick = onNavigateToFileTransfer
-                        )
-                        ActionCard(
-                            icon = Icons.Default.ContentPaste,
-                            label = "Clipboard",
-                            modifier = Modifier.weight(1f),
-                            onClick = { /* TODO */ }
-                        )
+                if (plugins.isNotEmpty()) {
+                    item {
+                        Text("Available Actions", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    // Build action rows from available plugins
+                    val actions = buildList {
+                        if ("file_transfer" in plugins) add(Triple(Icons.Default.Share, "Send File") { onNavigateToFileTransfer() })
+                        if ("clipboard" in plugins) add(Triple(Icons.Default.ContentPaste, "Clipboard") { /* TODO */ })
+                        if ("media" in plugins) add(Triple(Icons.Default.MusicNote, "Media") { /* TODO */ })
+                        if ("notification" in plugins) add(Triple(Icons.Default.Notifications, "Notifications") { /* TODO */ })
+                    }
+
+                    actions.chunked(2).forEach { row ->
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                row.forEach { (icon, label, onClick) ->
+                                    ActionCard(
+                                        icon = icon,
+                                        label = label,
+                                        modifier = Modifier.weight(1f),
+                                        onClick = onClick
+                                    )
+                                }
+                                if (row.size == 1) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
                     }
                 }
 
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ActionCard(
-                            icon = Icons.Default.Cast,
-                            label = "Media",
-                            modifier = Modifier.weight(1f),
-                            onClick = { /* TODO */ }
-                        )
-                        Spacer(Modifier.weight(1f))
+                if (dev.status is DeviceStatus.Connected) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Workspaces", style = MaterialTheme.typography.titleMedium)
+                            TextButton(onClick = { viewModel.loadWorkspaces() }) {
+                                Text("Refresh")
+                            }
+                        }
+                    }
+
+                    if (workspaceActionError != null) {
+                        item {
+                            Text(
+                                text = workspaceActionError ?: "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+
+                    if (isWorkspaceLoading) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        }
+                    } else {
+                        items(workspaces, key = { it.id }) { workspace ->
+                            WorkspaceCard(
+                                id = workspace.id,
+                                name = workspace.name,
+                                windows = workspace.windows,
+                                monitor = workspace.monitor,
+                                isActive = workspace.isActive,
+                                onClick = { viewModel.switchWorkspace(workspace.id) }
+                            )
+                        }
                     }
                 }
 
@@ -115,8 +169,47 @@ fun DeviceDetailScreen(
                     }
                 }
             }
-        } ?: Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+        } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorkspaceCard(
+    id: Int,
+    name: String,
+    windows: Int,
+    monitor: String?,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = if (isActive) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        }
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("#$id · $name", style = MaterialTheme.typography.titleSmall)
+                if (isActive) {
+                    Text("Current", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("Windows: $windows", style = MaterialTheme.typography.bodySmall)
+            if (!monitor.isNullOrBlank()) {
+                Text("Monitor: $monitor", style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }
@@ -135,7 +228,7 @@ fun ActionCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Icon(icon, null, Modifier.size(32.dp))
             Spacer(Modifier.height(8.dp))

@@ -20,13 +20,7 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun updateDeviceName(name: String) = settingsDataStore.updateDeviceName(name)
     override suspend fun setNotificationSync(enabled: Boolean) = settingsDataStore.setNotificationSync(enabled)
     override suspend fun setClipboardSync(enabled: Boolean) = settingsDataStore.setClipboardSync(enabled)
-    override suspend fun setFileTransfer(enabled: Boolean) {
-        // Implementation in DataStore if needed
-    }
-    override suspend fun setMediaControl(enabled: Boolean) {
-        // Implementation in DataStore if needed
-    }
-    override suspend fun setBatteryReporting(enabled: Boolean) {
-        // Implementation in DataStore if needed
-    }
+    override suspend fun setFileTransfer(enabled: Boolean) = settingsDataStore.setFileTransfer(enabled)
+    override suspend fun setMediaControl(enabled: Boolean) = settingsDataStore.setMediaControl(enabled)
+    override suspend fun setBatteryReporting(enabled: Boolean) = settingsDataStore.setBatteryReporting(enabled)
 }

@@ -8,19 +8,15 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
-import dev.hyprconnect.app.data.local.CertificateStore
 import dev.hyprconnect.app.data.remote.HyprConnectClient
 import dev.hyprconnect.app.data.remote.JsonRpcRequest
 import dev.hyprconnect.app.domain.repository.DeviceRepository
+import dev.hyprconnect.app.domain.repository.SettingsRepository
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.serialization.json.*
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.security.MessageDigest
-import java.security.cert.X509Certificate
-import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -28,8 +24,8 @@ class HyprConnectService : Service() {
 
     @Inject lateinit var client: HyprConnectClient
     @Inject lateinit var deviceRepository: DeviceRepository
+    @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var clipboardMonitor: ClipboardMonitor
-    @Inject lateinit var certificateStore: CertificateStore
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val TAG = "HyprConnectService"
@@ -41,7 +37,7 @@ class HyprConnectService : Service() {
         Log.d(TAG, "Service onCreate")
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
-        
+
         clipboardMonitor.start()
         startBatteryUpdates()
         listenForMessages()
@@ -70,7 +66,9 @@ class HyprConnectService : Service() {
         serviceScope.launch {
             while (isActive) {
                 try {
-                    sendBatteryUpdate()
+                    if (settingsRepository.batteryReporting.first()) {
+                        sendBatteryUpdate()
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Battery update failed: ${e.message}")
                 }
@@ -83,7 +81,7 @@ class HyprConnectService : Service() {
         val bm = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val status = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
-        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || 
+        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                          status == BatteryManager.BATTERY_STATUS_FULL
 
         val update = JsonRpcRequest(
@@ -108,83 +106,28 @@ class HyprConnectService : Service() {
     }
 
     private fun handleRemoteRequest(request: JsonRpcRequest) {
-        val params = request.params
-        Log.d(TAG, "Handling method: ${request.method}")
-        when (request.method) {
-            "clipboard.set" -> {
-                if (params is JsonObject) {
-                    val content = params["content"]?.jsonPrimitive?.contentOrNull
-                    content?.let { 
-                        Log.d(TAG, "Setting remote clipboard content")
-                        clipboardMonitor.setRemoteClipboard(it) 
-                    }
-                }
-            }
-            "pair.approved" -> {
-                Log.d(TAG, "Processing pair.approved notification")
-                if (params is JsonObject) {
-                    val deviceId = params["device_id"]?.jsonPrimitive?.contentOrNull
-                    val deviceName = params["device_name"]?.jsonPrimitive?.contentOrNull
-                    Log.d(TAG, "Extracted deviceId: $deviceId, deviceName: $deviceName")
-                    if (deviceId != null && deviceName != null) {
-                        val userCode = deviceRepository.getPairingCode()
-                        val remoteCert = client.getPeerCertificate()
-                        val localCert = certificateStore.getSelfCertificate()
-
-                        if (userCode != null && remoteCert != null) {
-                            val calculatedCode = calculateVerificationCode(localCert, remoteCert)
-                            if (userCode == calculatedCode) {
-                                Log.i(TAG, "SAS Verification Successful for $deviceId")
-                                serviceScope.launch {
-                                    try {
-                                        val success = deviceRepository.handlePairingApproved(deviceId, deviceName)
-                                        Log.d(TAG, "handlePairingApproved result: $success")
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error handling pairing approval: ${e.message}", e)
-                                    }
-                                }
-                            } else {
-                                Log.e(TAG, "SECURITY ALERT: SAS Mismatch! Expected $calculatedCode, got $userCode. Possible MITM attack.")
-                                client.disconnect()
+        serviceScope.launch {
+            val params = request.params
+            Log.d(TAG, "Handling method: ${request.method}")
+            when (request.method) {
+                "clipboard.set" -> {
+                    if (settingsRepository.clipboardSync.first()) {
+                        if (params is JsonObject) {
+                            val content = params["content"]?.jsonPrimitive?.contentOrNull
+                            content?.let {
+                                Log.d(TAG, "Setting remote clipboard content")
+                                clipboardMonitor.setRemoteClipboard(it)
                             }
-                        } else {
-                            Log.w(TAG, "Missing pairing code or certificates for verification")
                         }
                     } else {
-                        Log.w(TAG, "pair.approved missing device_id or device_name")
+                        Log.d(TAG, "Clipboard sync is disabled, ignoring request")
                     }
-                } else {
-                    Log.w(TAG, "pair.approved params is not a JsonObject")
                 }
-            }
-            else -> {
-                Log.d(TAG, "No handler for method: ${request.method}")
+                else -> {
+                    Log.d(TAG, "No handler for method: ${request.method}")
+                }
             }
         }
-    }
-
-    private fun calculateVerificationCode(local: X509Certificate, remote: X509Certificate): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val fingerprints = listOf(digest.digest(local.encoded), digest.digest(remote.encoded))
-            .sortedWith { a, b ->
-                val len = minOf(a.size, b.size)
-                for (i in 0 until len) {
-                    val res = (a[i].toInt() and 0xFF).compareTo(b[i].toInt() and 0xFF)
-                    if (res != 0) return@sortedWith res
-                }
-                a.size.compareTo(b.size)
-            }
-
-        val combinedDigest = MessageDigest.getInstance("SHA-256")
-        combinedDigest.update(fingerprints[0])
-        combinedDigest.update(fingerprints[1])
-        val hash = combinedDigest.digest()
-        
-        val num = ByteBuffer.wrap(hash.take(4).toByteArray())
-            .order(ByteOrder.BIG_ENDIAN)
-            .int.toLong() and 0xFFFFFFFFL
-        
-        return String.format(Locale.US, "%06d", num % 1000000)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

@@ -3,9 +3,7 @@ package dev.hyprconnect.app.data.remote
 import android.util.Log
 import dev.hyprconnect.app.data.local.CertificateStore
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
@@ -35,6 +33,9 @@ class HyprConnectClient @Inject constructor(
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
     private val _incomingRequests = MutableSharedFlow<JsonRpcRequest>(extraBufferCapacity = 64)
     val incomingRequests: SharedFlow<JsonRpcRequest> = _incomingRequests.asSharedFlow()
@@ -102,20 +103,17 @@ class HyprConnectClient @Inject constructor(
             
             val session = rawSocket.session
             Log.d(TAG, "Handshake successful. Session valid: ${session.isValid}")
-            Log.d(TAG, "Local Certificates presented: ${session.localCertificates?.size ?: 0}")
-            if (session.localCertificates != null) {
-                val localCert = session.localCertificates[0] as X509Certificate
-                Log.d(TAG, "Local Cert Subject: ${localCert.subjectX500Principal}")
-            }
             
             socket = rawSocket
             reader = BufferedReader(InputStreamReader(rawSocket.inputStream))
             writer = BufferedWriter(OutputStreamWriter(rawSocket.outputStream))
 
+            _isConnected.value = true
             startListening()
             true
         } catch (e: Exception) {
             Log.e(TAG, "Connection failed to $host:$port: ${e.message}", e)
+            _isConnected.value = false
             false
         }
     }
@@ -123,7 +121,6 @@ class HyprConnectClient @Inject constructor(
     fun getPeerCertificate(): X509Certificate? {
         return try {
             val certs = socket?.session?.peerCertificates
-            Log.d(TAG, "Peer certs found: ${certs?.size ?: 0}")
             certs?.firstOrNull() as? X509Certificate
         } catch (e: Exception) {
             Log.e(TAG, "Error getting peer certificate: ${e.message}")
@@ -136,10 +133,8 @@ class HyprConnectClient @Inject constructor(
             try {
                 while (isActive) {
                     val line = reader?.readLine() ?: break
-                    Log.d(TAG, "Received: $line")
                     try {
                         val message = json.decodeFromString<JsonRpcMessage>(line)
-                        Log.d(TAG, "Decoded message, emitting to flow. Subscribers: ${_incomingMessages.subscriptionCount.value}")
                         _incomingMessages.emit(message)
                         
                         if (message.isRequest()) {
@@ -149,7 +144,6 @@ class HyprConnectClient @Inject constructor(
                                 params = message.params,
                                 id = message.id
                             )
-                            Log.d(TAG, "Emitting request: ${request.method}. Subscribers: ${_incomingRequests.subscriptionCount.value}")
                             _incomingRequests.emit(request)
                         }
                     } catch (e: Exception) {
@@ -165,9 +159,9 @@ class HyprConnectClient @Inject constructor(
     }
 
     suspend fun sendRequest(request: JsonRpcRequest): Boolean = withContext(Dispatchers.IO) {
+        if (!_isConnected.value) return@withContext false
         try {
             val line = json.encodeToString(request)
-            Log.d(TAG, "Sending request: $line")
             writer?.write(line)
             writer?.newLine()
             writer?.flush()
@@ -179,9 +173,9 @@ class HyprConnectClient @Inject constructor(
     }
 
     suspend fun sendResponse(response: JsonRpcResponse): Boolean = withContext(Dispatchers.IO) {
+        if (!_isConnected.value) return@withContext false
         try {
             val line = json.encodeToString(response)
-            Log.d(TAG, "Sending response: $line")
             writer?.write(line)
             writer?.newLine()
             writer?.flush()
@@ -193,14 +187,19 @@ class HyprConnectClient @Inject constructor(
     }
 
     fun disconnect() {
+        if (!_isConnected.value && socket == null) return
         Log.d(TAG, "Disconnecting client...")
+        _isConnected.value = false
         try {
             socket?.close()
             reader?.close()
             writer?.close()
-            socket = null
         } catch (e: Exception) {
             Log.e(TAG, "Disconnect error: ${e.message}")
+        } finally {
+            socket = null
+            reader = null
+            writer = null
         }
     }
 }

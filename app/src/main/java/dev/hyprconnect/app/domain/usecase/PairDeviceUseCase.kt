@@ -7,7 +7,7 @@ import javax.inject.Inject
 class PairDeviceUseCase @Inject constructor(
     private val deviceRepository: DeviceRepository
 ) {
-    suspend operator fun invoke(device: Device): Boolean {
+    suspend operator fun invoke(device: Device): String? {
         return deviceRepository.pairDevice(device)
     }
 }

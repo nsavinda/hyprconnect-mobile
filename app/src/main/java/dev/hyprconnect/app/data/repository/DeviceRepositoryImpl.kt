@@ -8,15 +8,25 @@ import dev.hyprconnect.app.data.remote.JsonRpcRequest
 import dev.hyprconnect.app.domain.model.Device
 import dev.hyprconnect.app.domain.model.DeviceStatus
 import dev.hyprconnect.app.domain.model.DeviceType
+import dev.hyprconnect.app.domain.model.Workspace
 import dev.hyprconnect.app.domain.repository.DeviceRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.security.cert.X509Certificate
 import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,6 +49,23 @@ class DeviceRepositoryImpl @Inject constructor(
 
     private var discoveryJob: kotlinx.coroutines.Job? = null
     private var currentPairingDevice: Device? = null
+    private var nextRequestId: Int = 1000
+
+    init {
+        // Observe connection state to update device status
+        client.isConnected
+            .onEach { isConnected ->
+                Log.d(TAG, "Client connection state changed: $isConnected")
+                updateAllDevicesStatus(if (isConnected) DeviceStatus.Connected else DeviceStatus.Disconnected)
+            }
+            .launchIn(scope)
+    }
+
+    private fun updateAllDevicesStatus(status: DeviceStatus) {
+        _pairedDevices.value = _pairedDevices.value.map { 
+            it.copy(status = status)
+        }
+    }
 
     override fun startDiscovery() {
         discoveryJob?.cancel()
@@ -54,37 +81,33 @@ class DeviceRepositoryImpl @Inject constructor(
         discoveryJob = null
     }
 
-    override suspend fun pairDevice(device: Device): Boolean {
+    override suspend fun pairDevice(device: Device): String? {
         currentPairingDevice = device
-        // 1. Initiate TLS Handshake (Insecure)
         if (!client.connect(device.host, device.port, trustAll = true)) {
             Log.e(TAG, "Failed to connect for pairing")
-            return false
+            return null
         }
 
-        // 2. We get the Host Certificate from the TLS session
-        val hostCert = client.getPeerCertificate() ?: return false
-
-        // 3. Send pair.request with our Client Certificate
         val selfCert = certificateStore.getSelfCertificate()
         val encodedCert = Base64.getEncoder().encodeToString(selfCert.encoded)
-        
+        val pairingDeviceName = android.os.Build.MODEL
+
         val pairRequest = JsonRpcRequest(
             method = "pair.request",
             params = buildJsonObject {
                 put("cert", encodedCert)
-                put("device_name", android.os.Build.MODEL)
+                put("device_name", pairingDeviceName)
                 put("device_type", "phone")
             },
             id = 1
         )
-        
+
         val sent = client.sendRequest(pairRequest)
         if (sent) {
-            Log.d(TAG, "Pairing request sent to ${device.name}")
-            return true
+            Log.d(TAG, "Pairing request sent to ${device.name}, pairingDeviceId=$pairingDeviceName")
+            return pairingDeviceName
         }
-        return false
+        return null
     }
 
     override suspend fun handlePairingCompleted(deviceId: String, deviceName: String, plugins: List<String>): Boolean {
@@ -96,11 +119,8 @@ class DeviceRepositoryImpl @Inject constructor(
             return false
         }
 
-        // Save certificate
         certificateStore.addTrustedCertificate(deviceId, hostCert)
-        Log.d(TAG, "Saved certificate for $deviceId")
 
-        // Update UI state
         val device = currentPairingDevice?.copy(
             id = deviceId,
             name = deviceName,
@@ -120,19 +140,12 @@ class DeviceRepositoryImpl @Inject constructor(
 
         _pairedDevices.value = _pairedDevices.value.filter { it.id != deviceId } + device
 
-        // Reconnect with trustAll=false
+        // Reconnect with trustAll=false to establish trusted session
         scope.launch {
-            Log.d(TAG, "Reconnecting to $deviceId with mutual trust...")
             val host = currentPairingDevice?.host ?: return@launch
             val port = currentPairingDevice?.port ?: return@launch
-
             client.disconnect()
-            val success = client.connect(host, port, trustAll = false)
-            if (success) {
-                Log.d(TAG, "Reconnect success: Trusted connection established")
-            } else {
-                Log.e(TAG, "Reconnect failed after pairing approval")
-            }
+            client.connect(host, port, trustAll = false)
         }
 
         return true
@@ -143,10 +156,80 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun connectToDevice(device: Device): Boolean {
+        currentPairingDevice = device // Track this so we can reconnect if needed
         return client.connect(device.host, device.port, trustAll = false)
     }
 
     override fun disconnect() {
         client.disconnect()
+    }
+
+    override suspend fun listWorkspaces(): List<Workspace> {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "workspace.list",
+            id = requestId
+        )
+
+        if (!client.sendRequest(request)) {
+            Log.w(TAG, "workspace.list send failed")
+            return emptyList()
+        }
+
+        val response = awaitResponse(requestId) ?: return emptyList()
+        if (response.error != null) {
+            Log.w(TAG, "workspace.list error: ${response.error.message}")
+            return emptyList()
+        }
+
+        val resultObject = response.result as? JsonObject ?: return emptyList()
+        val workspaces = resultObject["workspaces"] as? JsonArray ?: return emptyList()
+
+        return workspaces.mapNotNull { item ->
+            val obj = item as? JsonObject ?: return@mapNotNull null
+            val id = obj["id"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
+            Workspace(
+                id = id,
+                name = obj["name"]?.jsonPrimitive?.contentOrNull ?: id.toString(),
+                monitor = obj["monitor"]?.jsonPrimitive?.contentOrNull,
+                windows = obj["windows"]?.jsonPrimitive?.intOrNull ?: 0,
+                isActive = obj["active"]?.jsonPrimitive?.booleanOrNull ?: false
+            )
+        }.sortedBy { it.id }
+    }
+
+    override suspend fun switchWorkspace(id: Int): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "workspace.switch",
+            params = buildJsonObject {
+                put("id", id)
+            },
+            id = requestId
+        )
+
+        if (!client.sendRequest(request)) {
+            Log.w(TAG, "workspace.switch send failed for id=$id")
+            return false
+        }
+
+        val response = awaitResponse(requestId) ?: return false
+        if (response.error != null) {
+            Log.w(TAG, "workspace.switch error: ${response.error.message}")
+            return false
+        }
+
+        return true
+    }
+
+    private fun nextRpcId(): Int {
+        nextRequestId += 1
+        return nextRequestId
+    }
+
+    private suspend fun awaitResponse(requestId: Int) = withTimeout(5000) {
+        client.incomingMessages.first { message ->
+            message.id == requestId && message.isResponse()
+        }
     }
 }

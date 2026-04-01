@@ -43,4 +43,16 @@ class SettingsDataStore @Inject constructor(
     suspend fun setClipboardSync(enabled: Boolean) {
         context.dataStore.edit { it[CLIPBOARD_SYNC] = enabled }
     }
+
+    suspend fun setFileTransfer(enabled: Boolean) {
+        context.dataStore.edit { it[FILE_TRANSFER] = enabled }
+    }
+
+    suspend fun setMediaControl(enabled: Boolean) {
+        context.dataStore.edit { it[MEDIA_CONTROL] = enabled }
+    }
+
+    suspend fun setBatteryReporting(enabled: Boolean) {
+        context.dataStore.edit { it[BATTERY_REPORTING] = enabled }
+    }
 }

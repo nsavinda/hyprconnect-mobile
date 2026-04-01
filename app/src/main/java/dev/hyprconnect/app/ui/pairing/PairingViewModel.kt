@@ -36,13 +36,13 @@ class PairingViewModel @Inject constructor(
     private val _connectionReady = MutableStateFlow(false)
     val connectionReady: StateFlow<Boolean> = _connectionReady.asStateFlow()
 
-    private var currentDeviceId: String? = null
+    // The device_id the daemon uses for this pairing session (our device name)
+    private var pairingDeviceId: String? = null
 
     fun startPairing(deviceId: String) {
         viewModelScope.launch {
             _error.value = null
             _connectionReady.value = false
-            currentDeviceId = deviceId
             Log.d(TAG, "Starting pairing for device: $deviceId")
             _isPairing.value = true
 
@@ -55,9 +55,10 @@ class PairingViewModel @Inject constructor(
                 return@launch
             }
 
-            val success = deviceRepository.pairDevice(device)
-            if (success) {
-                Log.d(TAG, "Pairing request sent, waiting for user to enter code")
+            val assignedId = deviceRepository.pairDevice(device)
+            if (assignedId != null) {
+                pairingDeviceId = assignedId
+                Log.d(TAG, "Pairing request sent, pairingDeviceId=$assignedId")
                 _connectionReady.value = true
             } else {
                 _error.value = "Failed to initiate pairing handshake"
@@ -68,7 +69,7 @@ class PairingViewModel @Inject constructor(
     }
 
     fun submitCode(code: String) {
-        val deviceId = currentDeviceId
+        val deviceId = pairingDeviceId
         if (deviceId == null) {
             _error.value = "No active pairing session"
             return
