@@ -1,5 +1,6 @@
 package dev.hyprconnect.app.ui.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -23,10 +24,11 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun NavGraph() {
+fun NavGraph(sharedUris: List<Uri> = emptyList()) {
     val navController = rememberNavController()
+    val startDestination = if (sharedUris.isNotEmpty()) Screen.FileTransfer.route else Screen.Home.route
     
-    NavHost(navController = navController, startDestination = Screen.Home.route) {
+    NavHost(navController = navController, startDestination = startDestination) {
         composable(Screen.Home.route) {
             HomeScreen(
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
@@ -58,7 +60,10 @@ fun NavGraph() {
             )
         }
         composable(Screen.FileTransfer.route) {
-            FileTransferScreen(onNavigateBack = { navController.popBackStack() })
+            FileTransferScreen(
+                onNavigateBack = { navController.popBackStack() },
+                sharedUris = sharedUris
+            )
         }
     }
 }
