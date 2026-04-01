@@ -18,4 +18,8 @@ interface DeviceRepository {
     suspend fun handlePairingCompleted(deviceId: String, deviceName: String, plugins: List<String>): Boolean
     suspend fun listWorkspaces(): List<Workspace>
     suspend fun switchWorkspace(id: Int): Boolean
+    suspend fun getSystemVolume(): Float?
+    suspend fun setSystemVolume(level: Float): Boolean
+    suspend fun getSystemBrightness(): Float?
+    suspend fun setSystemBrightness(level: Float): Boolean
 }

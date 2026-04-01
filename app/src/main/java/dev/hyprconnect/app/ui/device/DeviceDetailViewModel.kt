@@ -27,6 +27,15 @@ class DeviceDetailViewModel @Inject constructor(
     private val _workspaceActionError = MutableStateFlow<String?>(null)
     val workspaceActionError: StateFlow<String?> = _workspaceActionError.asStateFlow()
 
+    private val _systemVolume = MutableStateFlow(0.5f)
+    val systemVolume: StateFlow<Float> = _systemVolume.asStateFlow()
+
+    private val _systemBrightness = MutableStateFlow(0.5f)
+    val systemBrightness: StateFlow<Float> = _systemBrightness.asStateFlow()
+
+    private val _controlsError = MutableStateFlow<String?>(null)
+    val controlsError: StateFlow<String?> = _controlsError.asStateFlow()
+
     fun loadDevice(deviceId: String) {
         viewModelScope.launch {
             deviceRepository.pairedDevices.collect { devices ->
@@ -71,6 +80,53 @@ class DeviceDetailViewModel @Inject constructor(
             }
 
             _workspaces.value = deviceRepository.listWorkspaces()
+        }
+    }
+
+    fun loadSystemControls() {
+        viewModelScope.launch {
+            _controlsError.value = null
+            val volume = deviceRepository.getSystemVolume()
+            val brightness = deviceRepository.getSystemBrightness()
+
+            if (volume != null) {
+                _systemVolume.value = volume.coerceIn(0f, 1f)
+            }
+            if (brightness != null) {
+                _systemBrightness.value = brightness.coerceIn(0f, 1f)
+            }
+
+            if (volume == null || brightness == null) {
+                _controlsError.value = "Could not load volume/brightness from desktop"
+            }
+        }
+    }
+
+    fun setSystemVolume(level: Float) {
+        _systemVolume.value = level.coerceIn(0f, 1f)
+    }
+
+    fun commitSystemVolume(level: Float) {
+        viewModelScope.launch {
+            _controlsError.value = null
+            val success = deviceRepository.setSystemVolume(level.coerceIn(0f, 1f))
+            if (!success) {
+                _controlsError.value = "Failed to set volume"
+            }
+        }
+    }
+
+    fun setSystemBrightness(level: Float) {
+        _systemBrightness.value = level.coerceIn(0f, 1f)
+    }
+
+    fun commitSystemBrightness(level: Float) {
+        viewModelScope.launch {
+            _controlsError.value = null
+            val success = deviceRepository.setSystemBrightness(level.coerceIn(0f, 1f))
+            if (!success) {
+                _controlsError.value = "Failed to set brightness"
+            }
         }
     }
 }

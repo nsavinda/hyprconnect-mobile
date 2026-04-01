@@ -26,6 +26,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.put
 import java.util.Base64
 import javax.inject.Inject
@@ -219,6 +220,82 @@ class DeviceRepositoryImpl @Inject constructor(
             return false
         }
 
+        return true
+    }
+
+    override suspend fun getSystemVolume(): Float? {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(method = "system.volume.get", id = requestId)
+        if (!client.sendRequest(request)) {
+            Log.w(TAG, "system.volume.get send failed")
+            return null
+        }
+
+        val response = awaitResponse(requestId) ?: return null
+        if (response.error != null) {
+            Log.w(TAG, "system.volume.get error: ${response.error.message}")
+            return null
+        }
+
+        val resultObject = response.result as? JsonObject ?: return null
+        return resultObject["level"]?.jsonPrimitive?.floatOrNull
+    }
+
+    override suspend fun setSystemVolume(level: Float): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "system.volume.set",
+            params = buildJsonObject { put("level", level) },
+            id = requestId
+        )
+        if (!client.sendRequest(request)) {
+            Log.w(TAG, "system.volume.set send failed")
+            return false
+        }
+
+        val response = awaitResponse(requestId) ?: return false
+        if (response.error != null) {
+            Log.w(TAG, "system.volume.set error: ${response.error.message}")
+            return false
+        }
+        return true
+    }
+
+    override suspend fun getSystemBrightness(): Float? {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(method = "system.brightness.get", id = requestId)
+        if (!client.sendRequest(request)) {
+            Log.w(TAG, "system.brightness.get send failed")
+            return null
+        }
+
+        val response = awaitResponse(requestId) ?: return null
+        if (response.error != null) {
+            Log.w(TAG, "system.brightness.get error: ${response.error.message}")
+            return null
+        }
+
+        val resultObject = response.result as? JsonObject ?: return null
+        return resultObject["level"]?.jsonPrimitive?.floatOrNull
+    }
+
+    override suspend fun setSystemBrightness(level: Float): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "system.brightness.set",
+            params = buildJsonObject { put("level", level) },
+            id = requestId
+        )
+        if (!client.sendRequest(request)) {
+            Log.w(TAG, "system.brightness.set send failed")
+            return false
+        }
+
+        val response = awaitResponse(requestId) ?: return false
+        if (response.error != null) {
+            Log.w(TAG, "system.brightness.set error: ${response.error.message}")
+            return false
+        }
         return true
     }
 

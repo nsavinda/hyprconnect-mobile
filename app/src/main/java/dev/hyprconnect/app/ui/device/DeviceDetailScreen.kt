@@ -26,6 +26,9 @@ fun DeviceDetailScreen(
     val workspaces by viewModel.workspaces.collectAsState()
     val isWorkspaceLoading by viewModel.isWorkspaceLoading.collectAsState()
     val workspaceActionError by viewModel.workspaceActionError.collectAsState()
+    val systemVolume by viewModel.systemVolume.collectAsState()
+    val systemBrightness by viewModel.systemBrightness.collectAsState()
+    val controlsError by viewModel.controlsError.collectAsState()
 
     LaunchedEffect(deviceId) {
         viewModel.loadDevice(deviceId)
@@ -34,6 +37,7 @@ fun DeviceDetailScreen(
     LaunchedEffect(device?.status) {
         if (device?.status is DeviceStatus.Connected) {
             viewModel.loadWorkspaces()
+            viewModel.loadSystemControls()
         }
     }
 
@@ -107,6 +111,40 @@ fun DeviceDetailScreen(
 
                 if (dev.status is DeviceStatus.Connected) {
                     item {
+                        Text("System Controls", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    if (controlsError != null) {
+                        item {
+                            Text(
+                                text = controlsError ?: "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+
+                    item {
+                        ControlSliderCard(
+                            title = "Volume",
+                            icon = Icons.Default.VolumeUp,
+                            value = systemVolume,
+                            onValueChange = { viewModel.setSystemVolume(it) },
+                            onValueChangeFinished = { viewModel.commitSystemVolume(systemVolume) }
+                        )
+                    }
+
+                    item {
+                        ControlSliderCard(
+                            title = "Brightness",
+                            icon = Icons.Default.LightMode,
+                            value = systemBrightness,
+                            onValueChange = { viewModel.setSystemBrightness(it) },
+                            onValueChangeFinished = { viewModel.commitSystemBrightness(systemBrightness) }
+                        )
+                    }
+
+                    item {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -171,6 +209,39 @@ fun DeviceDetailScreen(
             }
         } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
+        }
+    }
+}
+
+@Composable
+private fun ControlSliderCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, contentDescription = title)
+                    Spacer(Modifier.width(8.dp))
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                }
+                Text("${(value * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+            }
+            Spacer(Modifier.height(8.dp))
+            Slider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = 0f..1f,
+                onValueChangeFinished = onValueChangeFinished
+            )
         }
     }
 }
