@@ -15,8 +15,8 @@ fun Long.toFormattedDate(): String {
     return format.format(date)
 }
 
-fun Int.toHumanReadableSize(): String {
-    val kb = 1024
+fun Long.toHumanReadableSize(): String {
+    val kb = 1024L
     val mb = kb * 1024
     val gb = mb * 1024
     return when {

@@ -84,9 +84,26 @@ class DeviceRepositoryImpl @Inject constructor(
 
     override suspend fun pairDevice(device: Device): String? {
         currentPairingDevice = device
-        if (!client.connect(device.host, device.port, trustAll = true)) {
-            Log.e(TAG, "Failed to connect for pairing")
-            return null
+        var pairingTarget = device
+        val connected = client.connect(pairingTarget.host, pairingTarget.port, trustAll = true)
+        if (!connected) {
+            val refreshed = findRefreshedDeviceTarget(device)
+            if (refreshed == null) {
+                Log.e(TAG, "Failed to connect for pairing")
+                return null
+            }
+
+            Log.w(
+                TAG,
+                "Retrying pairing connection with refreshed endpoint ${refreshed.host}:${refreshed.port} (was ${pairingTarget.host}:${pairingTarget.port})"
+            )
+            pairingTarget = refreshed
+            currentPairingDevice = refreshed
+
+            if (!client.connect(pairingTarget.host, pairingTarget.port, trustAll = true)) {
+                Log.e(TAG, "Failed to connect for pairing after refresh retry")
+                return null
+            }
         }
 
         val selfCert = certificateStore.getSelfCertificate()
@@ -105,10 +122,25 @@ class DeviceRepositoryImpl @Inject constructor(
 
         val sent = client.sendRequest(pairRequest)
         if (sent) {
-            Log.d(TAG, "Pairing request sent to ${device.name}, pairingDeviceId=$pairingDeviceName")
+            Log.d(TAG, "Pairing request sent to ${pairingTarget.name} at ${pairingTarget.host}:${pairingTarget.port}, pairingDeviceId=$pairingDeviceName")
             return pairingDeviceName
         }
         return null
+    }
+
+    private suspend fun findRefreshedDeviceTarget(original: Device): Device? {
+        return try {
+            withTimeout(5000) {
+                discovery.discoverDevices()
+                    .mapNotNull { discovered ->
+                        discovered.firstOrNull { it.id == original.id }
+                    }
+                    .first()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to refresh discovery for ${original.id}: ${e.message}")
+            null
+        }
     }
 
     override suspend fun handlePairingCompleted(deviceId: String, deviceName: String, plugins: List<String>): Boolean {

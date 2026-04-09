@@ -3,6 +3,8 @@ package dev.hyprconnect.app.ui.filetransfer
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.hyprconnect.app.data.remote.HyprConnectClient
@@ -17,8 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -27,17 +27,20 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.io.InputStream
 import java.security.MessageDigest
-import java.util.Base64
 import javax.inject.Inject
 
 @HiltViewModel
 class FileTransferViewModel @Inject constructor(
     private val client: HyprConnectClient
 ) : ViewModel() {
-    private val chunkSize = 128 * 1024
+    private val chunkSize = 2 * 1024 * 1024
+    private val hashVerificationThreshold = 32L * 1024L * 1024L
     private var requestIdCounter: Int = 5000
+
+    private data class OfferResult(
+        val transferId: String
+    )
 
     private val _transfers = MutableStateFlow<List<FileTransfer>>(emptyList())
     val transfers: StateFlow<List<FileTransfer>> = _transfers.asStateFlow()
@@ -49,7 +52,7 @@ class FileTransferViewModel @Inject constructor(
     }
 
     fun sendSharedUri(context: Context, uri: Uri) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val localId = java.util.UUID.randomUUID().toString()
             val contentResolver = context.contentResolver
             val fileName = queryDisplayName(contentResolver, uri) ?: "shared-file"
@@ -60,7 +63,8 @@ class FileTransferViewModel @Inject constructor(
                 name = fileName,
                 size = fileSize,
                 isIncoming = false,
-                progress = 0f
+                progress = 0f,
+                speed = 0L
             )
             _transfers.value += newTransfer
 
@@ -69,59 +73,31 @@ class FileTransferViewModel @Inject constructor(
                 return@launch
             }
 
-            val digest = MessageDigest.getInstance("SHA-256")
-            var bytesSent = 0L
-
             try {
-                val transferId = offerTransfer(fileName, fileSize)
-                if (transferId == null) {
+                val offer = offerTransfer(fileName, fileSize)
+                if (offer == null) {
                     updateStatus(localId, "Offer rejected or timed out")
                     return@launch
                 }
 
-                contentResolver.openInputStream(uri).use { input ->
-                    if (input == null) {
-                        updateStatus(localId, "Cannot open file")
-                        return@launch
-                    }
+                val tcpOk = sendViaTcpChunks(
+                    context, uri, offer.transferId, localId, fileSize
+                )
+                if (!tcpOk) return@launch
 
-                    val buffer = ByteArray(chunkSize)
-                    var read: Int
-                    var offset = 0L
-                    while (true) {
-                        read = withContext(Dispatchers.IO) { input.read(buffer) }
-                        if (read <= 0) break
+                // Compute hash for verification.
+                val hashHex = computeHash(contentResolver, uri, fileSize)
 
-                        digest.update(buffer, 0, read)
-                        val chunkBytes = if (read == buffer.size) buffer else buffer.copyOf(read)
-                        val encoded = Base64.getEncoder().withoutPadding().encodeToString(chunkBytes)
-
-                        val ok = sendChunk(transferId, offset, encoded)
-                        if (!ok) {
-                            updateStatus(localId, "Chunk upload failed")
-                            return@launch
-                        }
-
-                        offset += read
-                        bytesSent += read
-                        if (fileSize > 0) {
-                            updateProgress(localId, (bytesSent.toFloat() / fileSize.toFloat()).coerceIn(0f, 1f))
-                        }
-                    }
-                }
-
-                val hashHex = digest.digest().joinToString("") { "%02x".format(it) }
-                val finalizeResult = completeTransfer(transferId, fileName, hashHex)
+                val finalizeResult = completeTransfer(offer.transferId, fileName, hashHex)
                 val completed = when (finalizeResult) {
                     FinalizeOutcome.SUCCESS -> true
                     FinalizeOutcome.ERROR -> false
                     FinalizeOutcome.TIMEOUT -> {
-                        // Retry once in case the first response was delayed/missed.
-                        when (completeTransfer(transferId, fileName, hashHex)) {
+                        when (completeTransfer(offer.transferId, fileName, hashHex)) {
                             FinalizeOutcome.SUCCESS -> true
                             FinalizeOutcome.ERROR -> false
                             FinalizeOutcome.TIMEOUT -> {
-                                updateProgress(localId, 1f)
+                                updateProgress(localId, 1f, 0L)
                                 updateStatus(localId, "Completed (confirmation timeout)")
                                 true
                             }
@@ -134,15 +110,77 @@ class FileTransferViewModel @Inject constructor(
                     return@launch
                 }
 
-                updateProgress(localId, 1f)
-                updateStatus(localId, "Completed")
+                updateProgress(localId, 1f, 0L)
+                updateStatus(localId, "Completed (TCP)")
             } catch (e: Exception) {
                 updateStatus(localId, "Failed: ${e.message}")
             }
         }
     }
 
-    private suspend fun offerTransfer(fileName: String, fileSize: Long): String? {
+    private suspend fun sendViaTcpChunks(
+        context: Context,
+        uri: Uri,
+        transferId: String,
+        localId: String,
+        fileSize: Long
+    ): Boolean {
+        val contentResolver = context.contentResolver
+        var bytesSent = 0L
+        var lastUpdateTime = System.currentTimeMillis()
+        var lastBytesSent = 0L
+
+        contentResolver.openInputStream(uri).use { input ->
+            if (input == null) {
+                updateStatus(localId, "Cannot open file")
+                return false
+            }
+
+            val buffer = ByteArray(chunkSize)
+            var offset = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+
+                val encoded = Base64.encodeToString(buffer, 0, read, Base64.NO_WRAP)
+                val ok = sendChunk(transferId, offset, encoded)
+                if (!ok) {
+                    updateStatus(localId, "Chunk upload failed")
+                    return false
+                }
+
+                offset += read
+                bytesSent += read
+
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastUpdateTime >= 1000) {
+                    val durationSeconds = (currentTime - lastUpdateTime) / 1000.0
+                    val currentSpeed = ((bytesSent - lastBytesSent) / durationSeconds).toLong()
+                    val progress = if (fileSize > 0) (bytesSent.toFloat() / fileSize).coerceIn(0f, 1f) else 0f
+                    updateProgress(localId, progress, currentSpeed)
+                    lastUpdateTime = currentTime
+                    lastBytesSent = bytesSent
+                }
+            }
+        }
+        return true
+    }
+
+    private fun computeHash(contentResolver: ContentResolver, uri: Uri, fileSize: Long): String? {
+        if (fileSize !in 1..hashVerificationThreshold) return null
+        return contentResolver.openInputStream(uri)?.use { input ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            val buf = ByteArray(8192)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                digest.update(buf, 0, n)
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        }
+    }
+
+    private suspend fun offerTransfer(fileName: String, fileSize: Long): OfferResult? {
         val requestId = nextRequestId()
         val offer = JsonRpcRequest(
             method = "file.offer",
@@ -168,42 +206,32 @@ class FileTransferViewModel @Inject constructor(
         val result = response.result as? JsonObject ?: return null
         val accepted = result["accepted"]?.jsonPrimitive?.booleanOrNull ?: true
         if (!accepted) return null
-        return result["transfer_id"]?.jsonPrimitive?.contentOrNull
+        val transferId = result["transfer_id"]?.jsonPrimitive?.contentOrNull ?: return null
+        return OfferResult(transferId)
     }
 
     private suspend fun sendChunk(transferId: String, offset: Long, base64Data: String): Boolean {
-        val requestId = nextRequestId()
         val req = JsonRpcRequest(
             method = "file.chunk",
             params = buildJsonObject {
                 put("transfer_id", transferId)
                 put("offset", offset)
                 put("data", base64Data)
-            },
-            id = requestId
+            }
         )
-
-        val responseDeferred = viewModelScope.async(start = CoroutineStart.UNDISPATCHED) {
-            awaitResponse(requestId)
-        }
-
-        if (!client.sendRequest(req)) {
-            responseDeferred.cancel()
-            return false
-        }
-
-        val response = responseDeferred.await() ?: return false
-        return response.error == null
+        return client.sendRequest(req)
     }
 
-    private suspend fun completeTransfer(transferId: String, fileName: String, sha256: String): FinalizeOutcome {
+    private suspend fun completeTransfer(transferId: String, fileName: String, sha256: String?): FinalizeOutcome {
         val requestId = nextRequestId()
         val req = JsonRpcRequest(
             method = "file.complete",
             params = buildJsonObject {
                 put("transfer_id", transferId)
                 put("filename", fileName)
-                put("sha256", sha256)
+                if (!sha256.isNullOrBlank()) {
+                    put("sha256", sha256)
+                }
             },
             id = requestId
         )
@@ -218,9 +246,7 @@ class FileTransferViewModel @Inject constructor(
         }
 
         val response = responseDeferred.await() ?: return FinalizeOutcome.TIMEOUT
-        if (response.error != null) {
-            return FinalizeOutcome.ERROR
-        }
+        if (response.error != null) return FinalizeOutcome.ERROR
 
         val result = response.result as? JsonObject ?: return FinalizeOutcome.SUCCESS
         val success = result["success"]?.jsonPrimitive?.booleanOrNull
@@ -242,13 +268,13 @@ class FileTransferViewModel @Inject constructor(
 
     private fun updateStatus(id: String, status: String) {
         _transfers.value = _transfers.value.map {
-            if (it.id == id) it.copy(status = status) else it
+            if (it.id == id) it.copy(status = status, speed = 0L) else it
         }
     }
 
-    private fun updateProgress(id: String, progress: Float) {
+    private fun updateProgress(id: String, progress: Float, speed: Long) {
         _transfers.value = _transfers.value.map {
-            if (it.id == id) it.copy(progress = progress) else it
+            if (it.id == id) it.copy(progress = progress, speed = speed) else it
         }
     }
 
@@ -280,6 +306,7 @@ data class FileTransfer(
     val name: String,
     val size: Long,
     val progress: Float,
+    val speed: Long,
     val isIncoming: Boolean,
     val status: String = "Transferring"
 )

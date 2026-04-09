@@ -58,11 +58,17 @@ fun FileTransferScreen(
                     .fillMaxSize()
             ) {
                 items(transfers) { transfer ->
+                    val speedText = if (transfer.speed > 0L) {
+                        " • ${transfer.speed.toHumanReadableSize()}/s"
+                    } else {
+                        ""
+                    }
+
                     ListItem(
                         headlineContent = { Text(transfer.name) },
                         supportingContent = {
                             Column {
-                                Text("${(transfer.progress * 100).toInt()}% • ${transfer.status}")
+                                Text("${(transfer.progress * 100).toInt()}% • ${transfer.status}$speedText")
                                 LinearProgressIndicator(
                                     progress = { transfer.progress },
                                     modifier = Modifier
@@ -72,7 +78,7 @@ fun FileTransferScreen(
                             }
                         },
                         trailingContent = {
-                            Text(transfer.size.toInt().toHumanReadableSize())
+                            Text(transfer.size.toHumanReadableSize())
                         }
                     )
                 }

@@ -4,12 +4,15 @@ import android.util.Log
 import dev.hyprconnect.app.data.local.CertificateStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.Principal
 import java.security.PrivateKey
@@ -32,10 +35,15 @@ class HyprConnectClient @Inject constructor(
     private var socket: SSLSocket? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
+    private val writeMutex = Mutex()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+    /** The host we're currently connected to. */
+    var connectedHost: String? = null
+        private set
 
     private val _incomingRequests = MutableSharedFlow<JsonRpcRequest>(extraBufferCapacity = 64)
     val incomingRequests: SharedFlow<JsonRpcRequest> = _incomingRequests.asSharedFlow()
@@ -43,7 +51,7 @@ class HyprConnectClient @Inject constructor(
     private val _incomingMessages = MutableSharedFlow<JsonRpcMessage>(extraBufferCapacity = 64)
     val incomingMessages: SharedFlow<JsonRpcMessage> = _incomingMessages.asSharedFlow()
 
-    suspend fun connect(host: String, port: Int, trustAll: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+    suspend fun connect(host: String, port: Int, trustAll: Boolean = false, connectTimeoutMs: Int = 6000): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "Connecting to $host:$port (trustAll=$trustAll)")
         try {
             val sslContext = SSLContext.getInstance("TLSv1.3")
@@ -94,7 +102,8 @@ class HyprConnectClient @Inject constructor(
             sslContext.init(arrayOf(customKeyManager), trustManagers, SecureRandom())
             
             val factory = sslContext.socketFactory
-            val rawSocket = factory.createSocket(host, port) as SSLSocket
+            val rawSocket = factory.createSocket() as SSLSocket
+            rawSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
             rawSocket.enabledProtocols = arrayOf("TLSv1.3")
             
             // Go/Daemon often requires a client to start the handshake immediately
@@ -108,6 +117,7 @@ class HyprConnectClient @Inject constructor(
             reader = BufferedReader(InputStreamReader(rawSocket.inputStream))
             writer = BufferedWriter(OutputStreamWriter(rawSocket.outputStream))
 
+            connectedHost = host
             _isConnected.value = true
             startListening()
             true
@@ -162,9 +172,12 @@ class HyprConnectClient @Inject constructor(
         if (!_isConnected.value) return@withContext false
         try {
             val line = json.encodeToString(request)
-            writer?.write(line)
-            writer?.newLine()
-            writer?.flush()
+            writeMutex.withLock {
+                val currentWriter = writer ?: return@withContext false
+                currentWriter.write(line)
+                currentWriter.newLine()
+                currentWriter.flush()
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "Send request failed: ${e.message}")
@@ -176,9 +189,12 @@ class HyprConnectClient @Inject constructor(
         if (!_isConnected.value) return@withContext false
         try {
             val line = json.encodeToString(response)
-            writer?.write(line)
-            writer?.newLine()
-            writer?.flush()
+            writeMutex.withLock {
+                val currentWriter = writer ?: return@withContext false
+                currentWriter.write(line)
+                currentWriter.newLine()
+                currentWriter.flush()
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "Send response failed: ${e.message}")
@@ -190,6 +206,7 @@ class HyprConnectClient @Inject constructor(
         if (!_isConnected.value && socket == null) return
         Log.d(TAG, "Disconnecting client...")
         _isConnected.value = false
+        connectedHost = null
         try {
             socket?.close()
             reader?.close()
