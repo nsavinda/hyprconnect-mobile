@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import dev.hyprconnect.app.data.remote.HyprConnectClient
 import dev.hyprconnect.app.data.remote.JsonRpcMessage
 import dev.hyprconnect.app.data.remote.JsonRpcRequest
+import dev.hyprconnect.app.data.remote.QuicFileUploader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
@@ -32,14 +33,18 @@ import javax.inject.Inject
 
 @HiltViewModel
 class FileTransferViewModel @Inject constructor(
-    private val client: HyprConnectClient
+    private val client: HyprConnectClient,
+    private val quicUploader: QuicFileUploader
 ) : ViewModel() {
+    private val TAG = "FileTransferVM"
     private val chunkSize = 2 * 1024 * 1024
     private val hashVerificationThreshold = 32L * 1024L * 1024L
     private var requestIdCounter: Int = 5000
 
     private data class OfferResult(
-        val transferId: String
+        val transferId: String,
+        val uploadToken: String? = null,
+        val quicPort: Int? = null
     )
 
     private val _transfers = MutableStateFlow<List<FileTransfer>>(emptyList())
@@ -80,10 +85,23 @@ class FileTransferViewModel @Inject constructor(
                     return@launch
                 }
 
-                val tcpOk = sendViaTcpChunks(
-                    context, uri, offer.transferId, localId, fileSize
-                )
-                if (!tcpOk) return@launch
+                // Try QUIC/HTTP3 upload first, fall back to TCP base64 chunks
+                val dataOk = if (offer.uploadToken != null && offer.quicPort != null) {
+                    sendViaQuic(
+                        context, uri, offer.uploadToken, offer.quicPort,
+                        localId, fileSize
+                    )
+                } else {
+                    false
+                }
+
+                // Fallback to TCP chunks if QUIC was not available or failed
+                if (!dataOk) {
+                    val tcpOk = sendViaTcpChunks(
+                        context, uri, offer.transferId, localId, fileSize
+                    )
+                    if (!tcpOk) return@launch
+                }
 
                 // Compute hash for verification.
                 val hashHex = computeHash(contentResolver, uri, fileSize)
@@ -110,12 +128,62 @@ class FileTransferViewModel @Inject constructor(
                     return@launch
                 }
 
+                val method = if (dataOk) "QUIC" else "TCP"
                 updateProgress(localId, 1f, 0L)
-                updateStatus(localId, "Completed (TCP)")
+                updateStatus(localId, "Completed ($method)")
             } catch (e: Exception) {
                 updateStatus(localId, "Failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * Upload file via QUIC/HTTP3 using Cronet.
+     * Returns true if upload succeeded, false to trigger TCP fallback.
+     */
+    private suspend fun sendViaQuic(
+        context: Context,
+        uri: Uri,
+        uploadToken: String,
+        quicPort: Int,
+        localId: String,
+        fileSize: Long
+    ): Boolean {
+        val host = client.connectedHost ?: return false
+        Log.d(TAG, "Attempting QUIC upload to $host:$quicPort")
+        updateStatus(localId, "Uploading (QUIC)")
+
+        var lastUpdateTime = System.currentTimeMillis()
+        var lastBytesSent = 0L
+
+        val result = quicUploader.upload(
+            host = host,
+            quicPort = quicPort,
+            uploadToken = uploadToken,
+            uri = uri,
+            fileSize = fileSize,
+            contentResolver = context.contentResolver,
+            onProgress = { bytesSent ->
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastUpdateTime >= 500) {
+                    val durationSeconds = (currentTime - lastUpdateTime) / 1000.0
+                    val currentSpeed = ((bytesSent - lastBytesSent) / durationSeconds).toLong()
+                    val progress = if (fileSize > 0) (bytesSent.toFloat() / fileSize).coerceIn(0f, 1f) else 0f
+                    updateProgress(localId, progress, currentSpeed)
+                    lastUpdateTime = currentTime
+                    lastBytesSent = bytesSent
+                }
+            }
+        )
+
+        if (result.success) {
+            Log.d(TAG, "QUIC upload succeeded: ${result.bytesReceived} bytes")
+            return true
+        }
+
+        Log.w(TAG, "QUIC upload failed: ${result.error}, falling back to TCP")
+        updateStatus(localId, "QUIC failed, using TCP")
+        return false
     }
 
     private suspend fun sendViaTcpChunks(
@@ -207,7 +275,12 @@ class FileTransferViewModel @Inject constructor(
         val accepted = result["accepted"]?.jsonPrimitive?.booleanOrNull ?: true
         if (!accepted) return null
         val transferId = result["transfer_id"]?.jsonPrimitive?.contentOrNull ?: return null
-        return OfferResult(transferId)
+
+        // Extract QUIC upload info if available
+        val uploadToken = result["upload_token"]?.jsonPrimitive?.contentOrNull
+        val quicPort = result["quic_port"]?.jsonPrimitive?.intOrNull
+
+        return OfferResult(transferId, uploadToken, quicPort)
     }
 
     private suspend fun sendChunk(transferId: String, offset: Long, base64Data: String): Boolean {

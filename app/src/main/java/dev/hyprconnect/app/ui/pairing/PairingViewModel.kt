@@ -36,6 +36,10 @@ class PairingViewModel @Inject constructor(
     private val _connectionReady = MutableStateFlow(false)
     val connectionReady: StateFlow<Boolean> = _connectionReady.asStateFlow()
 
+    /** Human-readable name of the paired daemon device. */
+    private val _pairedDeviceName = MutableStateFlow<String?>(null)
+    val pairedDeviceName: StateFlow<String?> = _pairedDeviceName.asStateFlow()
+
     // The device_id the daemon uses for this pairing session (our device name)
     private var pairingDeviceId: String? = null
 
@@ -115,6 +119,7 @@ class PairingViewModel @Inject constructor(
                                 approvedDeviceId, deviceName, plugins
                             )
                             if (completed) {
+                                _pairedDeviceName.value = deviceName
                                 _isPaired.emit(true)
                             } else {
                                 _error.value = "Failed to finalize pairing"

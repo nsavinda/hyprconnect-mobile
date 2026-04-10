@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ fun PairingScreen(
     val connectionReady by viewModel.connectionReady.collectAsState()
     val error by viewModel.error.collectAsState()
     val isPaired by viewModel.isPaired.collectAsState(initial = false)
+    val pairedDeviceName by viewModel.pairedDeviceName.collectAsState()
 
     var codeInput by remember { mutableStateOf("") }
 
@@ -62,6 +64,7 @@ fun PairingScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            // Normal pairing flow
             Text(
                 "Complete Pairing",
                 style = MaterialTheme.typography.headlineMedium,
