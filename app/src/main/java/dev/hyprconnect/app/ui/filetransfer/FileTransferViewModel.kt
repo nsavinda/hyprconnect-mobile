@@ -11,6 +11,7 @@ import dev.hyprconnect.app.data.remote.HyprConnectClient
 import dev.hyprconnect.app.data.remote.JsonRpcMessage
 import dev.hyprconnect.app.data.remote.JsonRpcRequest
 import dev.hyprconnect.app.data.remote.QuicFileUploader
+import dev.hyprconnect.app.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
@@ -34,7 +35,8 @@ import javax.inject.Inject
 @HiltViewModel
 class FileTransferViewModel @Inject constructor(
     private val client: HyprConnectClient,
-    private val quicUploader: QuicFileUploader
+    private val quicUploader: QuicFileUploader,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
     private val TAG = "FileTransferVM"
     private val chunkSize = 2 * 1024 * 1024
@@ -79,14 +81,16 @@ class FileTransferViewModel @Inject constructor(
             }
 
             try {
-                val offer = offerTransfer(fileName, fileSize)
-                if (offer == null) {
-                    updateStatus(localId, "Offer rejected or timed out")
+                val quicEnabled = settingsRepository.quicTransfer.first()
+                val offerOutcome = offerTransfer(fileName, fileSize, quicEnabled)
+                if (offerOutcome is OfferOutcome.Failed) {
+                    updateStatus(localId, offerOutcome.reason)
                     return@launch
                 }
+                val offer = (offerOutcome as OfferOutcome.Success).result
 
                 // Try QUIC/HTTP3 upload first, fall back to TCP base64 chunks
-                val dataOk = if (offer.uploadToken != null && offer.quicPort != null) {
+                val dataOk = if (quicEnabled && offer.uploadToken != null && offer.quicPort != null) {
                     sendViaQuic(
                         context, uri, offer.uploadToken, offer.quicPort,
                         localId, fileSize
@@ -248,7 +252,12 @@ class FileTransferViewModel @Inject constructor(
         }
     }
 
-    private suspend fun offerTransfer(fileName: String, fileSize: Long): OfferResult? {
+    private sealed class OfferOutcome {
+        data class Success(val result: OfferResult) : OfferOutcome()
+        data class Failed(val reason: String) : OfferOutcome()
+    }
+
+    private suspend fun offerTransfer(fileName: String, fileSize: Long, quicEnabled: Boolean): OfferOutcome {
         val requestId = nextRequestId()
         val offer = JsonRpcRequest(
             method = "file.offer",
@@ -256,6 +265,7 @@ class FileTransferViewModel @Inject constructor(
                 put("filename", fileName)
                 put("size", fileSize)
                 put("mime_type", "application/octet-stream")
+                put("quic", quicEnabled)
             },
             id = requestId
         )
@@ -266,21 +276,31 @@ class FileTransferViewModel @Inject constructor(
 
         if (!client.sendRequest(offer)) {
             responseDeferred.cancel()
-            return null
+            return OfferOutcome.Failed("Failed to send offer (connection lost)")
         }
 
-        val response = responseDeferred.await() ?: return null
-        if (response.error != null) return null
-        val result = response.result as? JsonObject ?: return null
+        val response = responseDeferred.await()
+            ?: return OfferOutcome.Failed("Offer timed out (no response from daemon)")
+
+        if (response.error != null) {
+            val msg = response.error?.message ?: "unknown error"
+            return OfferOutcome.Failed("Daemon rejected offer: $msg")
+        }
+
+        val result = response.result as? JsonObject
+            ?: return OfferOutcome.Failed("Invalid offer response format")
+
         val accepted = result["accepted"]?.jsonPrimitive?.booleanOrNull ?: true
-        if (!accepted) return null
-        val transferId = result["transfer_id"]?.jsonPrimitive?.contentOrNull ?: return null
+        if (!accepted) return OfferOutcome.Failed("Offer rejected by daemon")
+
+        val transferId = result["transfer_id"]?.jsonPrimitive?.contentOrNull
+            ?: return OfferOutcome.Failed("Missing transfer_id in response")
 
         // Extract QUIC upload info if available
         val uploadToken = result["upload_token"]?.jsonPrimitive?.contentOrNull
         val quicPort = result["quic_port"]?.jsonPrimitive?.intOrNull
 
-        return OfferResult(transferId, uploadToken, quicPort)
+        return OfferOutcome.Success(OfferResult(transferId, uploadToken, quicPort))
     }
 
     private suspend fun sendChunk(transferId: String, offset: Long, base64Data: String): Boolean {

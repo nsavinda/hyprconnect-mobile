@@ -70,6 +70,7 @@ class DeviceRepositoryImpl @Inject constructor(
 
     override fun startDiscovery() {
         discoveryJob?.cancel()
+        _discoveredDevices.value = emptyList()
         discoveryJob = scope.launch {
             discovery.discoverDevices().collect { devices ->
                 _discoveredDevices.value = devices
@@ -80,6 +81,7 @@ class DeviceRepositoryImpl @Inject constructor(
     override fun stopDiscovery() {
         discoveryJob?.cancel()
         discoveryJob = null
+        _discoveredDevices.value = emptyList()
     }
 
     override suspend fun pairDevice(device: Device): String? {
@@ -130,10 +132,11 @@ class DeviceRepositoryImpl @Inject constructor(
 
     private suspend fun findRefreshedDeviceTarget(original: Device): Device? {
         return try {
-            withTimeout(5000) {
+            withTimeout(10000) {
                 discovery.discoverDevices()
                     .mapNotNull { discovered ->
-                        discovered.firstOrNull { it.id == original.id }
+                        // Find matching device with a DIFFERENT IP than the one that failed
+                        discovered.firstOrNull { it.id == original.id && it.host != original.host }
                     }
                     .first()
             }

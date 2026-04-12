@@ -24,6 +24,9 @@ class SettingsViewModel @Inject constructor(
     val clipboardSync: StateFlow<Boolean> = settingsRepository.clipboardSync
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val quicTransfer: StateFlow<Boolean> = settingsRepository.quicTransfer
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     fun updateDeviceName(name: String) {
         viewModelScope.launch {
             settingsRepository.updateDeviceName(name)
@@ -39,6 +42,19 @@ class SettingsViewModel @Inject constructor(
     fun setClipboardSync(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setClipboardSync(enabled)
+        }
+    }
+
+    fun setQuicTransfer(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setQuicTransfer(enabled)
+        }
+    }
+
+    fun clearAllData(onComplete: () -> Unit) {
+        viewModelScope.launch {
+            settingsRepository.clearAllData()
+            onComplete()
         }
     }
 }

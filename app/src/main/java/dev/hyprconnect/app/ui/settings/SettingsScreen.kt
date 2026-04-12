@@ -6,8 +6,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -20,6 +20,34 @@ fun SettingsScreen(
     val deviceName by viewModel.deviceName.collectAsState()
     val notificationSync by viewModel.notificationSync.collectAsState()
     val clipboardSync by viewModel.clipboardSync.collectAsState()
+    val quicTransfer by viewModel.quicTransfer.collectAsState()
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = { Text("Clear App Data") },
+            text = { Text("This will clear all settings, paired devices, and cached discovery data. You will need to re-pair your devices.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDialog = false
+                        viewModel.clearAllData { onNavigateBack() }
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -86,8 +114,28 @@ fun SettingsScreen(
                 )
             }
             
+            item { Spacer(Modifier.height(24.dp)) }
+
+            item {
+                Text(
+                    "Transfer",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+
+            item {
+                ToggleItem(
+                    title = "QUIC File Transfer",
+                    description = "Use faster QUIC protocol for file uploads. Falls back to TCP when disabled.",
+                    checked = quicTransfer,
+                    onCheckedChange = { viewModel.setQuicTransfer(it) }
+                )
+            }
+
             item { Spacer(Modifier.height(32.dp)) }
-            
+
             item {
                 Text(
                     "About",
@@ -102,6 +150,29 @@ fun SettingsScreen(
                     headlineContent = { Text("Version") },
                     supportingContent = { Text("0.1.0") }
                 )
+            }
+
+            item { Spacer(Modifier.height(32.dp)) }
+
+            item {
+                Text(
+                    "Data",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = { showClearDialog = true },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Clear App Data")
+                }
             }
         }
     }

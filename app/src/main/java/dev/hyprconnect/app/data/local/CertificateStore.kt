@@ -127,6 +127,15 @@ class CertificateStore @Inject constructor(
         saveKeyStore()
     }
 
+    fun clearTrustedCertificates() {
+        val aliasesToRemove = keyStore.aliases().toList().filter { it != ALIAS_SELF }
+        for (alias in aliasesToRemove) {
+            keyStore.deleteEntry(alias)
+        }
+        saveKeyStore()
+        Log.i(TAG, "Cleared ${aliasesToRemove.size} trusted certificates")
+    }
+
     fun getKeyStore(): KeyStore = keyStore
     fun getAlias(): String = ALIAS_SELF
 }

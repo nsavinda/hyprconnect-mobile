@@ -33,7 +33,9 @@ class DeviceDiscovery @Inject constructor(
                 val host = serviceInfo.host?.hostAddress ?: return
                 val port = serviceInfo.port
                 val name = serviceInfo.serviceName
-                
+
+                Log.d(TAG, "Resolved service: $name at $host:$port")
+
                 val deviceType = when (serviceInfo.attributes["device_type"]?.toString(Charsets.UTF_8)) {
                     "desktop" -> DeviceType.DESKTOP
                     "laptop" -> DeviceType.LAPTOP
@@ -52,7 +54,7 @@ class DeviceDiscovery @Inject constructor(
                     type = deviceType,
                     fingerprint = fingerprint
                 )
-                
+
                 discoveredDevices[name] = device
                 trySend(discoveredDevices.values.toList())
             }
