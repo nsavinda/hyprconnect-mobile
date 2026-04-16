@@ -1,54 +1,83 @@
 package dev.hyprconnect.app.ui.theme
 
 import android.app.Activity
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+// Fixed Hyprland / Catppuccin Mocha dark scheme — no dynamic color
+private val HyprColorScheme = darkColorScheme(
+    primary              = HyprBlue,
+    onPrimary            = HyprCrust,
+    primaryContainer     = HyprBlueContainer,
+    onPrimaryContainer   = HyprBlue,
+
+    secondary            = HyprMauve,
+    onSecondary          = HyprCrust,
+    secondaryContainer   = HyprMauveContainer,
+    onSecondaryContainer = HyprMauve,
+
+    tertiary             = HyprTeal,
+    onTertiary           = HyprCrust,
+    tertiaryContainer    = HyprTealContainer,
+    onTertiaryContainer  = HyprTeal,
+
+    error                = HyprPink,
+    onError              = HyprCrust,
+    errorContainer       = HyprPinkContainer,
+    onErrorContainer     = HyprPink,
+
+    background           = HyprBase,
+    onBackground         = HyprText,
+
+    surface              = HyprMantle,
+    onSurface            = HyprText,
+    surfaceVariant       = HyprSurface0,
+    onSurfaceVariant     = HyprSubtext1,
+
+    outline              = HyprSurface2,
+    outlineVariant       = HyprSurface1,
+
+    scrim                = HyprCrust,
+    inverseSurface       = HyprText,
+    inverseOnSurface     = HyprBase,
+    inversePrimary       = Color(0xFF3a5db5),
+    surfaceTint          = HyprBlue
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+// Hyprland-inspired shapes — generously rounded everywhere
+private val HyprShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small      = RoundedCornerShape(10.dp),
+    medium     = RoundedCornerShape(14.dp),
+    large      = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(28.dp)
 )
 
 @Composable
 fun HyprConnectTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            window.statusBarColor = HyprMantle.toArgb()
+            window.navigationBarColor = HyprMantle.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }
 
     MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
+        colorScheme = HyprColorScheme,
+        shapes      = HyprShapes,
+        typography  = Typography,
+        content     = content
     )
 }

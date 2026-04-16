@@ -8,6 +8,7 @@ import dev.hyprconnect.app.data.remote.JsonRpcRequest
 import dev.hyprconnect.app.domain.model.Device
 import dev.hyprconnect.app.domain.model.DeviceStatus
 import dev.hyprconnect.app.domain.model.DeviceType
+import dev.hyprconnect.app.domain.model.NowPlaying
 import dev.hyprconnect.app.domain.model.Workspace
 import dev.hyprconnect.app.domain.repository.DeviceRepository
 import kotlinx.coroutines.CoroutineScope
@@ -332,6 +333,99 @@ class DeviceRepositoryImpl @Inject constructor(
             return false
         }
         return true
+    }
+
+    // --- Media Control ---
+
+    override suspend fun mediaAction(action: String, player: String?): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "media.$action",
+            params = if (player != null) buildJsonObject { put("player", player) } else null,
+            id = requestId
+        )
+        if (!client.sendRequest(request)) return false
+        val response = awaitResponse(requestId) ?: return false
+        return response.error == null
+    }
+
+    override suspend fun getNowPlaying(): NowPlaying? {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(method = "media.now_playing", id = requestId)
+        if (!client.sendRequest(request)) return null
+        val response = awaitResponse(requestId) ?: return null
+        if (response.error != null) return null
+
+        val result = response.result as? JsonObject ?: return null
+        return NowPlaying(
+            title = result["title"]?.jsonPrimitive?.contentOrNull ?: "",
+            artist = result["artist"]?.jsonPrimitive?.contentOrNull ?: "",
+            album = result["album"]?.jsonPrimitive?.contentOrNull ?: "",
+            status = result["status"]?.jsonPrimitive?.contentOrNull ?: "stopped"
+        )
+    }
+
+    // --- Remote Input ---
+
+    override suspend fun inputMouseMove(dx: Float, dy: Float): Boolean {
+        val request = JsonRpcRequest(
+            method = "input.mouse.move",
+            params = buildJsonObject {
+                put("dx", dx)
+                put("dy", dy)
+            }
+        )
+        return client.sendRequest(request)
+    }
+
+    override suspend fun inputMouseClick(button: String): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "input.mouse.click",
+            params = buildJsonObject { put("button", button) },
+            id = requestId
+        )
+        if (!client.sendRequest(request)) return false
+        val response = awaitResponse(requestId) ?: return false
+        return response.error == null
+    }
+
+    override suspend fun inputMouseScroll(dx: Float, dy: Float): Boolean {
+        val request = JsonRpcRequest(
+            method = "input.mouse.scroll",
+            params = buildJsonObject {
+                put("dx", dx)
+                put("dy", dy)
+            }
+        )
+        return client.sendRequest(request)
+    }
+
+    override suspend fun inputKeyboardType(text: String): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "input.keyboard.type",
+            params = buildJsonObject { put("text", text) },
+            id = requestId
+        )
+        if (!client.sendRequest(request)) return false
+        val response = awaitResponse(requestId) ?: return false
+        return response.error == null
+    }
+
+    override suspend fun inputKeyboardKey(key: String, modifiers: List<String>): Boolean {
+        val requestId = nextRpcId()
+        val request = JsonRpcRequest(
+            method = "input.keyboard.key",
+            params = buildJsonObject {
+                put("key", key)
+                put("modifiers", kotlinx.serialization.json.JsonArray(modifiers.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            },
+            id = requestId
+        )
+        if (!client.sendRequest(request)) return false
+        val response = awaitResponse(requestId) ?: return false
+        return response.error == null
     }
 
     private fun nextRpcId(): Int {

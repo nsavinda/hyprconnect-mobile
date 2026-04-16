@@ -10,6 +10,8 @@ import dev.hyprconnect.app.ui.pairing.PairingScreen
 import dev.hyprconnect.app.ui.settings.SettingsScreen
 import dev.hyprconnect.app.ui.device.DeviceDetailScreen
 import dev.hyprconnect.app.ui.filetransfer.FileTransferScreen
+import dev.hyprconnect.app.ui.media.MediaControlScreen
+import dev.hyprconnect.app.ui.remoteinput.RemoteInputScreen
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
@@ -21,13 +23,15 @@ sealed class Screen(val route: String) {
         fun createRoute(deviceId: String) = "device/$deviceId"
     }
     object FileTransfer : Screen("file_transfer")
+    object MediaControl : Screen("media_control")
+    object RemoteInput : Screen("remote_input")
 }
 
 @Composable
 fun NavGraph(sharedUris: List<Uri> = emptyList()) {
     val navController = rememberNavController()
     val startDestination = if (sharedUris.isNotEmpty()) Screen.FileTransfer.route else Screen.Home.route
-    
+
     NavHost(navController = navController, startDestination = startDestination) {
         composable(Screen.Home.route) {
             HomeScreen(
@@ -56,13 +60,25 @@ fun NavGraph(sharedUris: List<Uri> = emptyList()) {
             DeviceDetailScreen(
                 deviceId = deviceId,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToFileTransfer = { navController.navigate(Screen.FileTransfer.route) }
+                onNavigateToFileTransfer = { navController.navigate(Screen.FileTransfer.route) },
+                onNavigateToMediaControl = { navController.navigate(Screen.MediaControl.route) },
+                onNavigateToRemoteInput = { navController.navigate(Screen.RemoteInput.route) }
             )
         }
         composable(Screen.FileTransfer.route) {
             FileTransferScreen(
                 onNavigateBack = { navController.popBackStack() },
                 sharedUris = sharedUris
+            )
+        }
+        composable(Screen.MediaControl.route) {
+            MediaControlScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.RemoteInput.route) {
+            RemoteInputScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }
