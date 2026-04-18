@@ -13,19 +13,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dagger.hilt.android.AndroidEntryPoint
+import dev.hyprconnect.app.service.ClipboardMonitor
 import dev.hyprconnect.app.service.HyprConnectService
 import dev.hyprconnect.app.ui.navigation.NavGraph
 import dev.hyprconnect.app.ui.theme.HyprConnectTheme
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var clipboardMonitor: ClipboardMonitor
+
     private var sharedUris by mutableStateOf<List<Uri>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         sharedUris = extractSharedUris(intent)
-        
+
         // Start HyprConnectService when the app opens
         val serviceIntent = Intent(this, HyprConnectService::class.java)
         startForegroundService(serviceIntent)
@@ -40,6 +45,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Reliable foreground signal: check if clipboard changed while we were away
+        // and push it to the PC. This handles the common case of copying in another app.
+        clipboardMonitor.onAppForeground()
     }
 
     override fun onNewIntent(intent: Intent) {

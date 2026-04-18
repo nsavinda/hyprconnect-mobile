@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import dev.hyprconnect.app.ui.clipboard.ClipboardScreen
 import dev.hyprconnect.app.ui.home.HomeScreen
 import dev.hyprconnect.app.ui.pairing.PairingScreen
 import dev.hyprconnect.app.ui.settings.SettingsScreen
@@ -25,6 +26,7 @@ sealed class Screen(val route: String) {
     object FileTransfer : Screen("file_transfer")
     object MediaControl : Screen("media_control")
     object RemoteInput : Screen("remote_input")
+    object ClipboardHistory : Screen("clipboard_history")
 }
 
 @Composable
@@ -62,8 +64,12 @@ fun NavGraph(sharedUris: List<Uri> = emptyList()) {
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToFileTransfer = { navController.navigate(Screen.FileTransfer.route) },
                 onNavigateToMediaControl = { navController.navigate(Screen.MediaControl.route) },
-                onNavigateToRemoteInput = { navController.navigate(Screen.RemoteInput.route) }
+                onNavigateToRemoteInput = { navController.navigate(Screen.RemoteInput.route) },
+                onNavigateToClipboard = { navController.navigate(Screen.ClipboardHistory.route) }
             )
+        }
+        composable(Screen.ClipboardHistory.route) {
+            ClipboardScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.FileTransfer.route) {
             FileTransferScreen(

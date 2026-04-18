@@ -31,7 +31,8 @@ fun DeviceDetailScreen(
     onNavigateBack: () -> Unit,
     onNavigateToFileTransfer: () -> Unit,
     onNavigateToMediaControl: () -> Unit = {},
-    onNavigateToRemoteInput: () -> Unit = {}
+    onNavigateToRemoteInput: () -> Unit = {},
+    onNavigateToClipboard: () -> Unit = {}
 ) {
     val device by viewModel.device.collectAsState()
     val workspaces by viewModel.workspaces.collectAsState()
@@ -161,7 +162,7 @@ fun DeviceDetailScreen(
                         if ("file_transfer" in plugins) add(Triple(Icons.Default.Share, "Send File") { onNavigateToFileTransfer() })
                         if ("media" in plugins) add(Triple(Icons.Default.MusicNote, "Media") { onNavigateToMediaControl() })
                         if ("input" in plugins) add(Triple(Icons.Default.TouchApp, "Remote Input") { onNavigateToRemoteInput() })
-                        if ("clipboard" in plugins) add(Triple(Icons.Default.ContentPaste, "Clipboard") { })
+                        if ("clipboard" in plugins) add(Triple(Icons.Default.ContentPaste, "Clipboard") { onNavigateToClipboard() })
                         if ("notification" in plugins) add(Triple(Icons.Default.Notifications, "Notifications") { })
                     }
 

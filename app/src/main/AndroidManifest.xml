@@ -68,6 +68,26 @@
             </intent-filter>
         </service>
 
+        <!-- Quick Settings tile: lets the user send clipboard to PC without opening the app. -->
+        <service
+            android:name=".service.ClipboardSyncTile"
+            android:icon="@drawable/ic_tile_clipboard"
+            android:label="@string/tile_clipboard_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Transparent trampoline activity that gains focus so it can read the clipboard. -->
+        <activity
+            android:name=".service.ClipboardSendActivity"
+            android:theme="@style/Theme.HyprConnect.Transparent"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
     </application>
 
 </manifest>

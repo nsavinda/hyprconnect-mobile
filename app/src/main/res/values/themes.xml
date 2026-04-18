@@ -2,4 +2,13 @@
 <resources>
 
     <style name="Theme.HyprConnect" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Fully transparent theme for the clipboard trampoline activity. -->
+    <style name="Theme.HyprConnect.Transparent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

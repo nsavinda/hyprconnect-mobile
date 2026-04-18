@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">HyprConnect</string>
+    <string name="tile_clipboard_label">Send Clipboard</string>
 </resources>
