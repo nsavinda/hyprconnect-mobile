@@ -1,6 +1,8 @@
 package dev.hyprconnect.app.service
 
 import android.os.Bundle
+import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -8,17 +10,12 @@ import dev.hyprconnect.app.data.remote.HyprConnectClient
 import javax.inject.Inject
 
 /**
- * Transparent trampoline activity launched by [ClipboardSyncTile].
+ * Transparent trampoline activity launched when clipboard changes in background.
  *
- * Android 10+ forbids clipboard reads from background processes, but an Activity
- * that has focus can always read the clipboard. This activity:
- *   1. Gets focus (transparent window, invisible to the user)
- *   2. Reads the current clipboard in onResume()
- *   3. Pushes the content to the connected PC
- *   4. Immediately finishes
- *
- * The user sees no UI — the quick-settings panel collapses, the send happens,
- * and a brief toast confirms success or explains why it was skipped.
+ * Android 10+ requires window focus (not just foreground process) for clipboard reads.
+ * An activity with no content never receives focus — this was KDE Connect's MR #145 fix.
+ * We set a minimal focusable FrameLayout so the window surfaces and receives focus, then
+ * read the clipboard in onWindowFocusChanged(true) once focus is confirmed.
  */
 @AndroidEntryPoint
 class ClipboardSendActivity : ComponentActivity() {
@@ -28,13 +25,17 @@ class ClipboardSendActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // No setContent — the window is transparent and immediately closes.
+        // A window needs a surface to receive focus. An empty FrameLayout is invisible
+        // but gives the window manager something to grant focus to.
+        setContentView(FrameLayout(this))
     }
 
-    override fun onResume() {
-        super.onResume()
-        sendClipboardToPC()
-        finish()
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            sendClipboardToPC()
+            finish()
+        }
     }
 
     private fun sendClipboardToPC() {
@@ -59,7 +60,7 @@ class ClipboardSendActivity : ComponentActivity() {
             return
         }
 
+        clipboardMonitor.cancelSyncNotification()
         clipboardMonitor.resend(text)
-        Toast.makeText(this, "Clipboard sent to PC", Toast.LENGTH_SHORT).show()
     }
 }

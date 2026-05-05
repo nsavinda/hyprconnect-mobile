@@ -73,8 +73,7 @@ class PairingViewModel @Inject constructor(
     }
 
     fun submitCode(code: String) {
-        val deviceId = pairingDeviceId
-        if (deviceId == null) {
+        val deviceId = pairingDeviceId ?: run {
             _error.value = "No active pairing session"
             return
         }
@@ -93,50 +92,42 @@ class PairingViewModel @Inject constructor(
                 id = 2
             )
 
-            // Listen for the response before sending
-            val responseJob = viewModelScope.launch {
-                client.incomingMessages
-                    .filter { it.id == 2 }
-                    .first()
-                    .let { message ->
-                        if (message.error != null) {
-                            _error.value = message.error.message
-                            Log.e(TAG, "pair.complete error: ${message.error.message}")
-                            _isSubmitting.value = false
-                            return@launch
-                        }
-
-                        val result = message.result
-                        if (result is JsonObject) {
-                            val approvedDeviceId = result["device_id"]?.jsonPrimitive?.contentOrNull ?: deviceId
-                            val deviceName = result["device_name"]?.jsonPrimitive?.contentOrNull ?: deviceId
-                            val plugins = result["plugins"]?.jsonArray
-                                ?.mapNotNull { it.jsonPrimitive.contentOrNull }
-                                ?: emptyList()
-
-                            Log.d(TAG, "Pairing approved. Plugins: $plugins")
-                            val completed = deviceRepository.handlePairingCompleted(
-                                approvedDeviceId, deviceName, plugins
-                            )
-                            if (completed) {
-                                _pairedDeviceName.value = deviceName
-                                _isPaired.emit(true)
-                            } else {
-                                _error.value = "Failed to finalize pairing"
-                            }
-                        } else {
-                            _error.value = "Unexpected response format"
-                        }
-                        _isSubmitting.value = false
-                    }
-            }
-
-            val sent = client.sendRequest(request)
-            if (!sent) {
-                responseJob.cancel()
-                _error.value = "Failed to send pairing code"
+            // sendRequestAwait registers the deferred BEFORE sending, so the
+            // response can never arrive and be dropped between send and collect.
+            val message = client.sendRequestAwait(request)
+            if (message == null) {
+                _error.value = "No response from server — check connection"
                 _isSubmitting.value = false
+                return@launch
             }
+
+            if (message.error != null) {
+                _error.value = message.error.message
+                Log.e(TAG, "pair.complete error: ${message.error.message}")
+                _isSubmitting.value = false
+                return@launch
+            }
+
+            val result = message.result
+            if (result is JsonObject) {
+                val approvedDeviceId = result["device_id"]?.jsonPrimitive?.contentOrNull ?: deviceId
+                val deviceName = result["device_name"]?.jsonPrimitive?.contentOrNull ?: deviceId
+                val plugins = result["plugins"]?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    ?: emptyList()
+
+                Log.d(TAG, "Pairing approved. Plugins: $plugins")
+                val completed = deviceRepository.handlePairingCompleted(approvedDeviceId, deviceName, plugins)
+                if (completed) {
+                    _pairedDeviceName.value = deviceName
+                    _isPaired.emit(true)
+                } else {
+                    _error.value = "Failed to finalize pairing"
+                }
+            } else {
+                _error.value = "Unexpected response format"
+            }
+            _isSubmitting.value = false
         }
     }
 }

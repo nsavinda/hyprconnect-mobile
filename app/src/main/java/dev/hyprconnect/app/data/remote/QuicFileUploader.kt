@@ -6,6 +6,7 @@ import android.util.Log
 import dev.hyprconnect.app.data.local.CertificateStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Dispatcher
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -39,7 +40,16 @@ class QuicFileUploader @Inject constructor(
         val sslContext = SSLContext.getInstance("TLSv1.3")
         sslContext.init(null, tmf.trustManagers, SecureRandom())
 
+        // Permit enough parallel uploads for our app-level gate (capped at 16).
+        // OkHttp's defaults (maxRequestsPerHost=5) would otherwise serialize folder
+        // uploads onto the same daemon regardless of our chosen concurrency.
+        val dispatcher = Dispatcher().apply {
+            maxRequests = 32
+            maxRequestsPerHost = 16
+        }
+
         OkHttpClient.Builder()
+            .dispatcher(dispatcher)
             .sslSocketFactory(sslContext.socketFactory, trustManager)
             .hostnameVerifier { _, _ -> true } // daemon uses IP, not hostname
             .connectTimeout(15, TimeUnit.SECONDS)

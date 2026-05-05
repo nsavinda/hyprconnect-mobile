@@ -18,6 +18,7 @@ import java.security.Principal
 import java.security.PrivateKey
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.*
@@ -27,11 +28,11 @@ class HyprConnectClient @Inject constructor(
     private val certificateStore: CertificateStore
 ) {
     private val TAG = "HyprConnectClient"
-    private val json = Json { 
-        ignoreUnknownKeys = true 
+    private val json = Json {
+        ignoreUnknownKeys = true
         encodeDefaults = true
     }
-    
+
     private var socket: SSLSocket? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
@@ -41,7 +42,6 @@ class HyprConnectClient @Inject constructor(
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
-    /** The host we're currently connected to. */
     var connectedHost: String? = null
         private set
 
@@ -51,11 +51,14 @@ class HyprConnectClient @Inject constructor(
     private val _incomingMessages = MutableSharedFlow<JsonRpcMessage>(extraBufferCapacity = 64)
     val incomingMessages: SharedFlow<JsonRpcMessage> = _incomingMessages.asSharedFlow()
 
+    // Registered before sending — completed when the matching response arrives.
+    private val pendingRequests = ConcurrentHashMap<Int, CompletableDeferred<JsonRpcMessage>>()
+
     suspend fun connect(host: String, port: Int, trustAll: Boolean = false, connectTimeoutMs: Int = 6000): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "Connecting to $host:$port (trustAll=$trustAll)")
         try {
             val sslContext = SSLContext.getInstance("TLSv1.3")
-            
+
             val trustManagers = if (trustAll) {
                 Log.w(TAG, "Using InsecureSkipVerify (trustAll=true)")
                 arrayOf<TrustManager>(object : X509TrustManager {
@@ -71,48 +74,47 @@ class HyprConnectClient @Inject constructor(
 
             val customKeyManager = object : X509ExtendedKeyManager() {
                 private val alias = certificateStore.getAlias()
-                
+
                 override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?): String {
                     Log.d(TAG, "chooseClientAlias: keyType=${keyType?.joinToString()}, issuers=${issuers?.size ?: 0}. Returning $alias")
                     return alias
                 }
-                
+
                 override fun chooseEngineClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, engine: SSLEngine?): String {
                     Log.d(TAG, "chooseEngineClientAlias. Returning $alias")
                     return alias
                 }
-                
+
                 override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?): Array<String> = arrayOf(alias)
                 override fun getCertificateChain(alias: String?): Array<X509Certificate> {
                     val cert = certificateStore.getSelfCertificate()
                     Log.d(TAG, "getCertificateChain for alias $alias. Subject: ${cert.subjectX500Principal}")
                     return arrayOf(cert)
                 }
-                
+
                 override fun getPrivateKey(alias: String?): PrivateKey {
                     Log.d(TAG, "getPrivateKey for alias $alias")
                     return certificateStore.getSelfPrivateKey()
                 }
-                
+
                 override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null
                 override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?): String? = null
                 override fun chooseEngineServerAlias(keyType: String?, issuers: Array<out Principal>?, engine: SSLEngine?): String? = null
             }
 
             sslContext.init(arrayOf(customKeyManager), trustManagers, SecureRandom())
-            
+
             val factory = sslContext.socketFactory
             val rawSocket = factory.createSocket() as SSLSocket
             rawSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
             rawSocket.enabledProtocols = arrayOf("TLSv1.3")
-            
-            // Go/Daemon often requires a client to start the handshake immediately
+
             Log.d(TAG, "Starting TLS 1.3 handshake...")
             rawSocket.startHandshake()
-            
+
             val session = rawSocket.session
             Log.d(TAG, "Handshake successful. Session valid: ${session.isValid}")
-            
+
             socket = rawSocket
             reader = BufferedReader(InputStreamReader(rawSocket.inputStream))
             writer = BufferedWriter(OutputStreamWriter(rawSocket.outputStream))
@@ -145,8 +147,12 @@ class HyprConnectClient @Inject constructor(
                     val line = reader?.readLine() ?: break
                     try {
                         val message = json.decodeFromString<JsonRpcMessage>(line)
+                        // Complete any awaiting deferred first — before SharedFlow emission
+                        // so sendRequestAwait() callers never miss a response.
+                        message.id?.let { id -> pendingRequests[id]?.complete(message) }
+
                         _incomingMessages.emit(message)
-                        
+
                         if (message.isRequest()) {
                             val request = JsonRpcRequest(
                                 jsonrpc = message.jsonrpc,
@@ -165,6 +171,39 @@ class HyprConnectClient @Inject constructor(
             } finally {
                 disconnect()
             }
+        }
+    }
+
+    /**
+     * Send a request and reliably await its response.
+     *
+     * Registers a CompletableDeferred keyed by request ID *before* sending, so the
+     * response can never arrive and be dropped between the send and the collect.
+     */
+    suspend fun sendRequestAwait(
+        request: JsonRpcRequest,
+        timeoutMs: Long = 10_000
+    ): JsonRpcMessage? {
+        val id = request.id ?: return run {
+            sendRequest(request)
+            null
+        }
+        val deferred = CompletableDeferred<JsonRpcMessage>()
+        pendingRequests[id] = deferred
+        return try {
+            if (!sendRequest(request)) {
+                Log.w(TAG, "sendRequestAwait: failed to send request id=$id")
+                return null
+            }
+            withTimeout(timeoutMs) { deferred.await() }
+        } catch (e: TimeoutCancellationException) {
+            Log.w(TAG, "sendRequestAwait: request id=$id timed out after ${timeoutMs}ms")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "sendRequestAwait: request id=$id cancelled: ${e.message}")
+            null
+        } finally {
+            pendingRequests.remove(id)
         }
     }
 
@@ -207,6 +246,9 @@ class HyprConnectClient @Inject constructor(
         Log.d(TAG, "Disconnecting client...")
         _isConnected.value = false
         connectedHost = null
+        // Cancel all pending request deferreds so callers don't hang.
+        pendingRequests.values.forEach { it.cancel() }
+        pendingRequests.clear()
         try {
             socket?.close()
             reader?.close()

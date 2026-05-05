@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Samsung One UI may grant this for third-party apps, enabling background clipboard reads. -->
+    <uses-permission android:name="android.permission.READ_CLIPBOARD_IN_BACKGROUND" tools:ignore="ProtectedPermissions" />
+    <!-- Allows launching ClipboardSendActivity from background (Android 10+ exception for background starts). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -87,6 +91,20 @@
             android:noHistory="true"
             android:excludeFromRecents="true"
             android:exported="false" />
+
+        <!-- Minimal accessibility service — grants the process background clipboard access. -->
+        <service
+            android:name=".service.HyprConnectAccessibilityService"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
     </application>
 

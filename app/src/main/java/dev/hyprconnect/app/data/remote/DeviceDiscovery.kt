@@ -45,6 +45,11 @@ class DeviceDiscovery @Inject constructor(
                 }
 
                 val fingerprint = serviceInfo.attributes["fingerprint"]?.toString(Charsets.UTF_8)
+                val addresses = serviceInfo.attributes["addresses"]?.toString(Charsets.UTF_8)
+                    ?.split(',')
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    ?: emptyList()
 
                 val device = Device(
                     id = name,
@@ -52,7 +57,8 @@ class DeviceDiscovery @Inject constructor(
                     host = host,
                     port = port,
                     type = deviceType,
-                    fingerprint = fingerprint
+                    fingerprint = fingerprint,
+                    addresses = addresses
                 )
 
                 discoveredDevices[name] = device

@@ -15,7 +15,10 @@ data class Device(
     val isPaired: Boolean = false,
     val lastSeen: Long = System.currentTimeMillis(),
     val fingerprint: String? = null,
-    val availablePlugins: List<String> = emptyList()
+    val availablePlugins: List<String> = emptyList(),
+    // Alternate IPs advertised by the daemon (mDNS TXT "addresses").
+    // Used when the resolved host is unreachable (stale cache, multi-NIC).
+    val addresses: List<String> = emptyList()
 )
 
 enum class DeviceType {

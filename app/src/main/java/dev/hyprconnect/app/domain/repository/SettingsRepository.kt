@@ -10,6 +10,7 @@ interface SettingsRepository {
     val mediaControl: Flow<Boolean>
     val batteryReporting: Flow<Boolean>
     val quicTransfer: Flow<Boolean>
+    val maxConcurrentTransfers: Flow<Int>
 
     suspend fun updateDeviceName(name: String)
     suspend fun setNotificationSync(enabled: Boolean)
@@ -18,5 +19,6 @@ interface SettingsRepository {
     suspend fun setMediaControl(enabled: Boolean)
     suspend fun setBatteryReporting(enabled: Boolean)
     suspend fun setQuicTransfer(enabled: Boolean)
+    suspend fun setMaxConcurrentTransfers(value: Int)
     suspend fun clearAllData()
 }

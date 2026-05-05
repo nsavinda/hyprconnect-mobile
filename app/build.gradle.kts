@@ -89,6 +89,9 @@ dependencies {
     // OkHttp for fast binary file upload over HTTPS
     implementation(libs.okhttp)
 
+    // DocumentFile for SAF folder traversal
+    implementation(libs.androidx.documentfile)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

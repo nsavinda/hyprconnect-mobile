@@ -27,6 +27,9 @@ class SettingsViewModel @Inject constructor(
     val quicTransfer: StateFlow<Boolean> = settingsRepository.quicTransfer
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val maxConcurrentTransfers: StateFlow<Int> = settingsRepository.maxConcurrentTransfers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 4)
+
     fun updateDeviceName(name: String) {
         viewModelScope.launch {
             settingsRepository.updateDeviceName(name)
@@ -48,6 +51,12 @@ class SettingsViewModel @Inject constructor(
     fun setQuicTransfer(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setQuicTransfer(enabled)
+        }
+    }
+
+    fun setMaxConcurrentTransfers(value: Int) {
+        viewModelScope.launch {
+            settingsRepository.setMaxConcurrentTransfers(value)
         }
     }
 

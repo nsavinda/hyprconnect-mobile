@@ -42,7 +42,7 @@ class DeviceRepositoryImpl @Inject constructor(
 
     private val TAG = "DeviceRepository"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    
+
     private val _pairedDevices = MutableStateFlow<List<Device>>(emptyList())
     override val pairedDevices: Flow<List<Device>> = _pairedDevices.asStateFlow()
 
@@ -54,7 +54,6 @@ class DeviceRepositoryImpl @Inject constructor(
     private var nextRequestId: Int = 1000
 
     init {
-        // Observe connection state to update device status
         client.isConnected
             .onEach { isConnected ->
                 Log.d(TAG, "Client connection state changed: $isConnected")
@@ -64,9 +63,7 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     private fun updateAllDevicesStatus(status: DeviceStatus) {
-        _pairedDevices.value = _pairedDevices.value.map { 
-            it.copy(status = status)
-        }
+        _pairedDevices.value = _pairedDevices.value.map { it.copy(status = status) }
     }
 
     override fun startDiscovery() {
@@ -88,8 +85,30 @@ class DeviceRepositoryImpl @Inject constructor(
     override suspend fun pairDevice(device: Device): String? {
         currentPairingDevice = device
         var pairingTarget = device
-        val connected = client.connect(pairingTarget.host, pairingTarget.port, trustAll = true)
-        if (!connected) {
+
+        // If we're already connected to this host from a previous attempt, skip the
+        // TLS handshake so we don't generate a second pairing code on the server.
+        val alreadyConnected = client.isConnected.value &&
+            client.connectedHost == pairingTarget.host
+        if (alreadyConnected) {
+            Log.d(TAG, "Already connected to ${pairingTarget.host}, reusing connection for pair.request")
+            val pairingDeviceName = android.os.Build.MODEL
+            val selfCert = certificateStore.getSelfCertificate()
+            val encodedCert = java.util.Base64.getEncoder().encodeToString(selfCert.encoded)
+            val pairRequest = JsonRpcRequest(
+                method = "pair.request",
+                params = buildJsonObject {
+                    put("cert", encodedCert)
+                    put("device_name", pairingDeviceName)
+                    put("device_type", "phone")
+                },
+                id = 1
+            )
+            return if (client.sendRequest(pairRequest)) pairingDeviceName else null
+        }
+
+        val resolvedHost = tryConnectAlternates(pairingTarget, trustAll = true)
+        if (resolvedHost == null) {
             val refreshed = findRefreshedDeviceTarget(device)
             if (refreshed == null) {
                 Log.e(TAG, "Failed to connect for pairing")
@@ -103,10 +122,16 @@ class DeviceRepositoryImpl @Inject constructor(
             pairingTarget = refreshed
             currentPairingDevice = refreshed
 
-            if (!client.connect(pairingTarget.host, pairingTarget.port, trustAll = true)) {
+            val refreshedHost = tryConnectAlternates(pairingTarget, trustAll = true)
+            if (refreshedHost == null) {
                 Log.e(TAG, "Failed to connect for pairing after refresh retry")
                 return null
             }
+            pairingTarget = pairingTarget.copy(host = refreshedHost)
+            currentPairingDevice = pairingTarget
+        } else if (resolvedHost != pairingTarget.host) {
+            pairingTarget = pairingTarget.copy(host = resolvedHost)
+            currentPairingDevice = pairingTarget
         }
 
         val selfCert = certificateStore.getSelfCertificate()
@@ -136,7 +161,6 @@ class DeviceRepositoryImpl @Inject constructor(
             withTimeout(10000) {
                 discovery.discoverDevices()
                     .mapNotNull { discovered ->
-                        // Find matching device with a DIFFERENT IP than the one that failed
                         discovered.firstOrNull { it.id == original.id && it.host != original.host }
                     }
                     .first()
@@ -177,12 +201,10 @@ class DeviceRepositoryImpl @Inject constructor(
 
         _pairedDevices.value = _pairedDevices.value.filter { it.id != deviceId } + device
 
-        // Reconnect with trustAll=false to establish trusted session
         scope.launch {
-            val host = currentPairingDevice?.host ?: return@launch
-            val port = currentPairingDevice?.port ?: return@launch
+            val target = currentPairingDevice ?: return@launch
             client.disconnect()
-            client.connect(host, port, trustAll = false)
+            tryConnectAlternates(target, trustAll = false)
         }
 
         return true
@@ -193,8 +215,62 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun connectToDevice(device: Device): Boolean {
-        currentPairingDevice = device // Track this so we can reconnect if needed
-        return client.connect(device.host, device.port, trustAll = false)
+        currentPairingDevice = device
+        val resolvedHost = tryConnectAlternates(device, trustAll = false) ?: return false
+        if (resolvedHost != device.host) {
+            currentPairingDevice = device.copy(host = resolvedHost)
+        }
+        return true
+    }
+
+    /**
+     * Try the device's primary host first, then each address advertised in
+     * the mDNS TXT record, preferring those on the same /24 subnet as one of
+     * this phone's interfaces. Returns the first host that connects.
+     */
+    private suspend fun tryConnectAlternates(device: Device, trustAll: Boolean): String? {
+        val candidates = buildCandidateList(device)
+        for (host in candidates) {
+            if (client.connect(host, device.port, trustAll = trustAll)) {
+                if (host != device.host) {
+                    Log.w(TAG, "Primary host ${device.host} unreachable; connected via alternate $host")
+                }
+                return host
+            }
+        }
+        return null
+    }
+
+    private fun buildCandidateList(device: Device): List<String> {
+        val all = LinkedHashSet<String>()
+        all += device.host
+        all += device.addresses
+        if (all.size <= 1) return all.toList()
+
+        val localPrefixes = localSubnetPrefixes()
+        // Same-subnet first, then everything else, preserving original order.
+        val (sameSubnet, other) = all.partition { ip ->
+            localPrefixes.any { prefix -> ip.startsWith(prefix) }
+        }
+        return sameSubnet + other
+    }
+
+    private fun localSubnetPrefixes(): List<String> {
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { it.interfaceAddresses }
+                .mapNotNull { ia ->
+                    val addr = ia.address ?: return@mapNotNull null
+                    if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
+                        // /24 prefix as a string ("10.39.214.")
+                        addr.hostAddress?.substringBeforeLast('.')?.plus('.')
+                    } else null
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read local interfaces: ${e.message}")
+            emptyList()
+        }
     }
 
     override fun disconnect() {
@@ -202,26 +278,14 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun listWorkspaces(): List<Workspace> {
-        val requestId = nextRpcId()
-        val request = JsonRpcRequest(
-            method = "workspace.list",
-            id = requestId
-        )
-
-        if (!client.sendRequest(request)) {
-            Log.w(TAG, "workspace.list send failed")
-            return emptyList()
-        }
-
-        val response = awaitResponse(requestId) ?: return emptyList()
+        val request = JsonRpcRequest(method = "workspace.list", id = nextRpcId())
+        val response = sendAndAwait(request) ?: return emptyList()
         if (response.error != null) {
             Log.w(TAG, "workspace.list error: ${response.error.message}")
             return emptyList()
         }
-
         val resultObject = response.result as? JsonObject ?: return emptyList()
         val workspaces = resultObject["workspaces"] as? JsonArray ?: return emptyList()
-
         return workspaces.mapNotNull { item ->
             val obj = item as? JsonObject ?: return@mapNotNull null
             val id = obj["id"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
@@ -236,126 +300,66 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun switchWorkspace(id: Int): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "workspace.switch",
-            params = buildJsonObject {
-                put("id", id)
-            },
-            id = requestId
+            params = buildJsonObject { put("id", id) },
+            id = nextRpcId()
         )
-
-        if (!client.sendRequest(request)) {
-            Log.w(TAG, "workspace.switch send failed for id=$id")
-            return false
-        }
-
-        val response = awaitResponse(requestId) ?: return false
+        val response = sendAndAwait(request) ?: return false
         if (response.error != null) {
             Log.w(TAG, "workspace.switch error: ${response.error.message}")
             return false
         }
-
         return true
     }
 
     override suspend fun getSystemVolume(): Float? {
-        val requestId = nextRpcId()
-        val request = JsonRpcRequest(method = "system.volume.get", id = requestId)
-        if (!client.sendRequest(request)) {
-            Log.w(TAG, "system.volume.get send failed")
-            return null
-        }
-
-        val response = awaitResponse(requestId) ?: return null
-        if (response.error != null) {
-            Log.w(TAG, "system.volume.get error: ${response.error.message}")
-            return null
-        }
-
+        val response = sendAndAwait(JsonRpcRequest(method = "system.volume.get", id = nextRpcId())) ?: return null
+        if (response.error != null) return null
         val resultObject = response.result as? JsonObject ?: return null
         return resultObject["level"]?.jsonPrimitive?.floatOrNull
     }
 
     override suspend fun setSystemVolume(level: Float): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "system.volume.set",
             params = buildJsonObject { put("level", level) },
-            id = requestId
+            id = nextRpcId()
         )
-        if (!client.sendRequest(request)) {
-            Log.w(TAG, "system.volume.set send failed")
-            return false
-        }
-
-        val response = awaitResponse(requestId) ?: return false
-        if (response.error != null) {
-            Log.w(TAG, "system.volume.set error: ${response.error.message}")
-            return false
-        }
-        return true
+        val response = sendAndAwait(request) ?: return false
+        return response.error == null
     }
 
     override suspend fun getSystemBrightness(): Float? {
-        val requestId = nextRpcId()
-        val request = JsonRpcRequest(method = "system.brightness.get", id = requestId)
-        if (!client.sendRequest(request)) {
-            Log.w(TAG, "system.brightness.get send failed")
-            return null
-        }
-
-        val response = awaitResponse(requestId) ?: return null
-        if (response.error != null) {
-            Log.w(TAG, "system.brightness.get error: ${response.error.message}")
-            return null
-        }
-
+        val response = sendAndAwait(JsonRpcRequest(method = "system.brightness.get", id = nextRpcId())) ?: return null
+        if (response.error != null) return null
         val resultObject = response.result as? JsonObject ?: return null
         return resultObject["level"]?.jsonPrimitive?.floatOrNull
     }
 
     override suspend fun setSystemBrightness(level: Float): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "system.brightness.set",
             params = buildJsonObject { put("level", level) },
-            id = requestId
+            id = nextRpcId()
         )
-        if (!client.sendRequest(request)) {
-            Log.w(TAG, "system.brightness.set send failed")
-            return false
-        }
-
-        val response = awaitResponse(requestId) ?: return false
-        if (response.error != null) {
-            Log.w(TAG, "system.brightness.set error: ${response.error.message}")
-            return false
-        }
-        return true
+        val response = sendAndAwait(request) ?: return false
+        return response.error == null
     }
 
-    // --- Media Control ---
-
     override suspend fun mediaAction(action: String, player: String?): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "media.$action",
             params = if (player != null) buildJsonObject { put("player", player) } else null,
-            id = requestId
+            id = nextRpcId()
         )
-        if (!client.sendRequest(request)) return false
-        val response = awaitResponse(requestId) ?: return false
+        val response = sendAndAwait(request) ?: return false
         return response.error == null
     }
 
     override suspend fun getNowPlaying(): NowPlaying? {
-        val requestId = nextRpcId()
-        val request = JsonRpcRequest(method = "media.now_playing", id = requestId)
-        if (!client.sendRequest(request)) return null
-        val response = awaitResponse(requestId) ?: return null
+        val response = sendAndAwait(JsonRpcRequest(method = "media.now_playing", id = nextRpcId())) ?: return null
         if (response.error != null) return null
-
         val result = response.result as? JsonObject ?: return null
         return NowPlaying(
             title = result["title"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -364,8 +368,6 @@ class DeviceRepositoryImpl @Inject constructor(
             status = result["status"]?.jsonPrimitive?.contentOrNull ?: "stopped"
         )
     }
-
-    // --- Remote Input ---
 
     override suspend fun inputMouseMove(dx: Float, dy: Float): Boolean {
         val request = JsonRpcRequest(
@@ -379,14 +381,12 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun inputMouseClick(button: String): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "input.mouse.click",
             params = buildJsonObject { put("button", button) },
-            id = requestId
+            id = nextRpcId()
         )
-        if (!client.sendRequest(request)) return false
-        val response = awaitResponse(requestId) ?: return false
+        val response = sendAndAwait(request) ?: return false
         return response.error == null
     }
 
@@ -402,29 +402,25 @@ class DeviceRepositoryImpl @Inject constructor(
     }
 
     override suspend fun inputKeyboardType(text: String): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "input.keyboard.type",
             params = buildJsonObject { put("text", text) },
-            id = requestId
+            id = nextRpcId()
         )
-        if (!client.sendRequest(request)) return false
-        val response = awaitResponse(requestId) ?: return false
+        val response = sendAndAwait(request) ?: return false
         return response.error == null
     }
 
     override suspend fun inputKeyboardKey(key: String, modifiers: List<String>): Boolean {
-        val requestId = nextRpcId()
         val request = JsonRpcRequest(
             method = "input.keyboard.key",
             params = buildJsonObject {
                 put("key", key)
                 put("modifiers", kotlinx.serialization.json.JsonArray(modifiers.map { kotlinx.serialization.json.JsonPrimitive(it) }))
             },
-            id = requestId
+            id = nextRpcId()
         )
-        if (!client.sendRequest(request)) return false
-        val response = awaitResponse(requestId) ?: return false
+        val response = sendAndAwait(request) ?: return false
         return response.error == null
     }
 
@@ -433,9 +429,8 @@ class DeviceRepositoryImpl @Inject constructor(
         return nextRequestId
     }
 
-    private suspend fun awaitResponse(requestId: Int) = withTimeout(5000) {
-        client.incomingMessages.first { message ->
-            message.id == requestId && message.isResponse()
-        }
-    }
+    // Registers the deferred BEFORE sending to avoid the race between
+    // sendRequest completing and the response arriving on the IO thread.
+    private suspend fun sendAndAwait(request: JsonRpcRequest) =
+        client.sendRequestAwait(request, timeoutMs = 5_000)
 }

@@ -31,7 +31,7 @@ class HyprNotificationListenerService : NotificationListenerService() {
 
             val notification = sbn.notification
             val extras = notification.extras
-            val title = extras.getString("android.title") ?: ""
+            val title = extras.getCharSequence("android.title")?.toString() ?: ""
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
             val packageName = sbn.packageName
 

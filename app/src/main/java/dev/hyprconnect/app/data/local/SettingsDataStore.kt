@@ -24,6 +24,7 @@ class SettingsDataStore @Inject constructor(
         val MEDIA_CONTROL = booleanPreferencesKey("media_control")
         val BATTERY_REPORTING = booleanPreferencesKey("battery_reporting")
         val QUIC_TRANSFER = booleanPreferencesKey("quic_transfer")
+        val MAX_CONCURRENT_TRANSFERS = intPreferencesKey("max_concurrent_transfers")
     }
 
     val deviceName: Flow<String> = context.dataStore.data.map { it[DEVICE_NAME] ?: android.os.Build.MODEL }
@@ -33,6 +34,9 @@ class SettingsDataStore @Inject constructor(
     val mediaControl: Flow<Boolean> = context.dataStore.data.map { it[MEDIA_CONTROL] ?: true }
     val batteryReporting: Flow<Boolean> = context.dataStore.data.map { it[BATTERY_REPORTING] ?: true }
     val quicTransfer: Flow<Boolean> = context.dataStore.data.map { it[QUIC_TRANSFER] ?: true }
+    val maxConcurrentTransfers: Flow<Int> = context.dataStore.data.map {
+        (it[MAX_CONCURRENT_TRANSFERS] ?: 4).coerceIn(1, 16)
+    }
 
     suspend fun updateDeviceName(name: String) {
         context.dataStore.edit { it[DEVICE_NAME] = name }
@@ -60,6 +64,10 @@ class SettingsDataStore @Inject constructor(
 
     suspend fun setQuicTransfer(enabled: Boolean) {
         context.dataStore.edit { it[QUIC_TRANSFER] = enabled }
+    }
+
+    suspend fun setMaxConcurrentTransfers(value: Int) {
+        context.dataStore.edit { it[MAX_CONCURRENT_TRANSFERS] = value.coerceIn(1, 16) }
     }
 
     suspend fun clearAll() {

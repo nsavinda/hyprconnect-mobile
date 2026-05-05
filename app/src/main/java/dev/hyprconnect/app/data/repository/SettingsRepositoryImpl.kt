@@ -19,6 +19,7 @@ class SettingsRepositoryImpl @Inject constructor(
     override val mediaControl: Flow<Boolean> = settingsDataStore.mediaControl
     override val batteryReporting: Flow<Boolean> = settingsDataStore.batteryReporting
     override val quicTransfer: Flow<Boolean> = settingsDataStore.quicTransfer
+    override val maxConcurrentTransfers: Flow<Int> = settingsDataStore.maxConcurrentTransfers
 
     override suspend fun updateDeviceName(name: String) = settingsDataStore.updateDeviceName(name)
     override suspend fun setNotificationSync(enabled: Boolean) = settingsDataStore.setNotificationSync(enabled)
@@ -27,6 +28,7 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun setMediaControl(enabled: Boolean) = settingsDataStore.setMediaControl(enabled)
     override suspend fun setBatteryReporting(enabled: Boolean) = settingsDataStore.setBatteryReporting(enabled)
     override suspend fun setQuicTransfer(enabled: Boolean) = settingsDataStore.setQuicTransfer(enabled)
+    override suspend fun setMaxConcurrentTransfers(value: Int) = settingsDataStore.setMaxConcurrentTransfers(value)
 
     override suspend fun clearAllData() {
         settingsDataStore.clearAll()
