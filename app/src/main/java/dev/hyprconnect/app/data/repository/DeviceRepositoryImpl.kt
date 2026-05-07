@@ -210,8 +210,32 @@ class DeviceRepositoryImpl @Inject constructor(
         return true
     }
 
-    override suspend fun unpairDevice(deviceId: String) {
+    override suspend fun unpairDevice(deviceId: String, notifyPeer: Boolean) {
+        // Best-effort: tell the desktop to remove its trusted cert too.
+        // Done before disconnect so the notification has a chance to flush.
+        if (notifyPeer && currentPairingDevice?.id == deviceId) {
+            try {
+                client.sendRequest(
+                    JsonRpcRequest(
+                        method = "device.unpaired",
+                        params = buildJsonObject {
+                            put("device_id", deviceId)
+                            put("reason", "user_request")
+                        }
+                        // No id => JSON-RPC notification.
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to notify desktop of unpair: ${e.message}")
+            }
+        }
+
         _pairedDevices.value = _pairedDevices.value.filter { it.id != deviceId }
+        certificateStore.removeTrustedCertificate(deviceId)
+        if (currentPairingDevice?.id == deviceId) {
+            client.disconnect()
+            currentPairingDevice = null
+        }
     }
 
     override suspend fun connectToDevice(device: Device): Boolean {

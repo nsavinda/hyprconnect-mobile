@@ -30,6 +30,9 @@ class SettingsViewModel @Inject constructor(
     val maxConcurrentTransfers: StateFlow<Int> = settingsRepository.maxConcurrentTransfers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 4)
 
+    val transferPriority: StateFlow<String> = settingsRepository.transferPriority
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "off")
+
     fun updateDeviceName(name: String) {
         viewModelScope.launch {
             settingsRepository.updateDeviceName(name)
@@ -57,6 +60,12 @@ class SettingsViewModel @Inject constructor(
     fun setMaxConcurrentTransfers(value: Int) {
         viewModelScope.launch {
             settingsRepository.setMaxConcurrentTransfers(value)
+        }
+    }
+
+    fun setTransferPriority(value: String) {
+        viewModelScope.launch {
+            settingsRepository.setTransferPriority(value)
         }
     }
 

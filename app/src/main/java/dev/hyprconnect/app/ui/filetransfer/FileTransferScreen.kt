@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilePresent
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.hyprconnect.app.ui.theme.*
 import dev.hyprconnect.app.util.toHumanReadableSize
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +38,9 @@ fun FileTransferScreen(
 ) {
     val transfers by viewModel.transfers.collectAsState()
     val batches by viewModel.batches.collectAsState()
+    val overallElapsedMs by viewModel.overallElapsedMs.collectAsState()
+    val activeCount by viewModel.activeCount.collectAsState()
+    val nowMs = System.currentTimeMillis()
     val context = LocalContext.current
     val handledUris = remember { mutableSetOf<String>() }
 
@@ -85,8 +90,13 @@ fun FileTransferScreen(
                             color = HyprText
                         )
                         if (transfers.isNotEmpty()) {
+                            val finished = activeCount == 0
+                            val label = if (finished)
+                                "${transfers.size} done · took ${formatElapsed(overallElapsedMs)}"
+                            else
+                                "$activeCount active · elapsed ${formatElapsed(overallElapsedMs)}"
                             Text(
-                                "${transfers.size} active",
+                                label,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp,
                                 color = HyprSubtext0
@@ -157,10 +167,14 @@ fun FileTransferScreen(
                     contentPadding = PaddingValues(vertical = 16.dp)
                 ) {
                     items(batches, key = { it.id }) { batch ->
-                        BatchCard(batch = batch)
+                        BatchCard(
+                            batch = batch,
+                            nowMs = nowMs,
+                            onCancel = { viewModel.cancelBatch(batch.id) }
+                        )
                     }
                     items(transfers, key = { it.id }) { transfer ->
-                        TransferCard(transfer = transfer)
+                        TransferCard(transfer = transfer, nowMs = nowMs)
                     }
                 }
             }
@@ -168,8 +182,20 @@ fun FileTransferScreen(
     }
 }
 
+private fun formatElapsed(elapsedMs: Long): String {
+    val totalSeconds = (elapsedMs / 1000).coerceAtLeast(0)
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%02d:%02d", minutes, seconds)
+    }
+}
+
 @Composable
-private fun BatchCard(batch: FolderBatch) {
+private fun BatchCard(batch: FolderBatch, nowMs: Long, onCancel: () -> Unit) {
     val progress = if (batch.totalSize > 0)
         (batch.transferredBytes.toFloat() / batch.totalSize).coerceIn(0f, 1f)
     else if (batch.totalFiles > 0)
@@ -232,13 +258,28 @@ private fun BatchCard(batch: FolderBatch) {
                     }
                 }
 
-                Text(
-                    "${(progress * 100).toInt()}%",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = accent
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${(progress * 100).toInt()}%",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = accent
+                    )
+                    if (batch.active) {
+                        Spacer(Modifier.width(6.dp))
+                        IconButton(
+                            onClick = onCancel,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                null,
+                                tint = HyprSubtext1
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(10.dp))
@@ -259,17 +300,27 @@ private fun BatchCard(batch: FolderBatch) {
                 )
             }
 
-            if (batch.activeSpeed > 0) {
+            if (batch.startMs != null) {
                 Spacer(Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    if (batch.activeSpeed > 0) {
+                        Text(
+                            text = "${batch.activeSpeed.toHumanReadableSize()}/s",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = HyprBlue
+                        )
+                    } else {
+                        Spacer(Modifier.width(1.dp))
+                    }
                     Text(
-                        text = "${batch.activeSpeed.toHumanReadableSize()}/s",
+                        text = "elapsed ${formatElapsed(elapsedFrom(batch.startMs, batch.endMs, nowMs))}",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
-                        color = HyprBlue
+                        color = HyprOverlay0
                     )
                 }
             }
@@ -332,7 +383,7 @@ private fun PickerButton(
 }
 
 @Composable
-private fun TransferCard(transfer: FileTransfer) {
+private fun TransferCard(transfer: FileTransfer, nowMs: Long) {
     val progressColor = when {
         transfer.progress >= 1f -> HyprGreen
         transfer.status.contains("error", ignoreCase = true) -> HyprPink
@@ -435,15 +486,32 @@ private fun TransferCard(transfer: FileTransfer) {
                     fontSize = 11.sp,
                     color = HyprSubtext0
                 )
-                if (transfer.speed > 0L) {
-                    Text(
-                        text = "${transfer.speed.toHumanReadableSize()}/s",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        color = HyprBlue
-                    )
+                val showElapsed = transfer.batchId == null && transfer.startMs != null
+                when {
+                    transfer.speed > 0L -> {
+                        Text(
+                            text = "${transfer.speed.toHumanReadableSize()}/s",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = HyprBlue
+                        )
+                    }
+                    showElapsed -> {
+                        Text(
+                            text = "elapsed ${formatElapsed(elapsedFrom(transfer.startMs, transfer.endMs, nowMs))}",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = HyprOverlay0
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+private fun elapsedFrom(startMs: Long?, endMs: Long?, nowMs: Long): Long {
+    val start = startMs ?: return 0L
+    val end = endMs ?: nowMs
+    return (end - start).coerceAtLeast(0L)
 }

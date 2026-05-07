@@ -136,6 +136,15 @@ class CertificateStore @Inject constructor(
         Log.i(TAG, "Cleared ${aliasesToRemove.size} trusted certificates")
     }
 
+    fun removeTrustedCertificate(alias: String) {
+        if (alias == ALIAS_SELF) return
+        if (keyStore.containsAlias(alias)) {
+            keyStore.deleteEntry(alias)
+            saveKeyStore()
+            Log.i(TAG, "Removed trusted certificate for alias=$alias")
+        }
+    }
+
     fun getKeyStore(): KeyStore = keyStore
     fun getAlias(): String = ALIAS_SELF
 }

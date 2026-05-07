@@ -13,7 +13,14 @@ interface DeviceRepository {
     fun stopDiscovery()
     /** Returns the pairing device_id assigned by the daemon, or null on failure. */
     suspend fun pairDevice(device: Device): String?
-    suspend fun unpairDevice(deviceId: String)
+    /**
+     * Drops local pairing for [deviceId]. When [notifyPeer] is true (the
+     * default), best-effort notifies the desktop so it removes its trusted
+     * cert and forces a fresh pair on next connect. Pass false when the
+     * caller is itself reacting to a remote `device.unpaired` notification
+     * to avoid notification loops.
+     */
+    suspend fun unpairDevice(deviceId: String, notifyPeer: Boolean = true)
     suspend fun connectToDevice(device: Device): Boolean
     fun disconnect()
     suspend fun handlePairingCompleted(deviceId: String, deviceName: String, plugins: List<String>): Boolean

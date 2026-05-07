@@ -123,6 +123,19 @@ class HyprConnectService : Service() {
                         Log.d(TAG, "Clipboard sync is disabled, ignoring request")
                     }
                 }
+                "device.unpaired" -> {
+                    val deviceId = (params as? JsonObject)
+                        ?.get("device_id")
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                    if (deviceId != null) {
+                        Log.i(TAG, "Desktop '$deviceId' unpaired this device — clearing local pairing")
+                        // notifyPeer=false: desktop has already removed its side; avoid loop.
+                        deviceRepository.unpairDevice(deviceId, notifyPeer = false)
+                    } else {
+                        Log.w(TAG, "device.unpaired without device_id; ignoring")
+                    }
+                }
                 else -> {
                     Log.d(TAG, "No handler for method: ${request.method}")
                 }

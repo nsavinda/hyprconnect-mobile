@@ -12,6 +12,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okio.BufferedSink
+import java.io.IOException
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -84,6 +85,7 @@ class QuicFileUploader @Inject constructor(
         uri: Uri,
         fileSize: Long,
         contentResolver: ContentResolver,
+        shouldCancel: (() -> Boolean)? = null,
         onProgress: ((bytesSent: Long) -> Unit)? = null
     ): UploadResult = withContext(Dispatchers.IO) {
         val url = "https://$host:$quicPort/upload/$uploadToken"
@@ -98,6 +100,9 @@ class QuicFileUploader @Inject constructor(
                     val buffer = ByteArray(256 * 1024)
                     var bytesSent = 0L
                     while (true) {
+                        if (shouldCancel?.invoke() == true) {
+                            throw IOException("Canceled")
+                        }
                         val read = input.read(buffer)
                         if (read <= 0) break
                         sink.write(buffer, 0, read)

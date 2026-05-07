@@ -45,6 +45,7 @@ fun SettingsScreen(
     val clipboardSync  by viewModel.clipboardSync.collectAsState()
     val quicTransfer   by viewModel.quicTransfer.collectAsState()
     val maxConcurrent  by viewModel.maxConcurrentTransfers.collectAsState()
+    val transferPriority by viewModel.transferPriority.collectAsState()
     var showClearDialog by remember { mutableStateOf(false) }
 
     // Re-check on every resume so indicators update after returning from system settings.
@@ -356,6 +357,19 @@ fun SettingsScreen(
                             range = 1..16,
                             onValueChange = { viewModel.setMaxConcurrentTransfers(it) }
                         )
+                        HyprDivider()
+                        HyprChoiceItem(
+                            title = "Transfer priority",
+                            description = "Order in which folder files are picked up",
+                            value = transferPriority,
+                            options = listOf(
+                                "off" to "off",
+                                "small" to "small first",
+                                "big" to "big first",
+                                "balanced" to "balanced"
+                            ),
+                            onValueChange = { viewModel.setTransferPriority(it) }
+                        )
                     }
                 }
             }
@@ -454,6 +468,58 @@ private fun HyprDivider() {
         thickness = 0.5.dp,
         color = HyprSurface2
     )
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun HyprChoiceItem(
+    title: String,
+    description: String,
+    value: String,
+    options: List<Pair<String, String>>,
+    onValueChange: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Text(
+            title,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = HyprText
+        )
+        Text(
+            description,
+            style = MaterialTheme.typography.bodySmall,
+            color = HyprSubtext0
+        )
+        Spacer(Modifier.height(10.dp))
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (key, label) ->
+                val selected = key == value
+                Surface(
+                    color = if (selected) HyprBlueContainer else HyprMantle,
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = { onValueChange(key) }
+                ) {
+                    Text(
+                        text = label,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selected) HyprBlue else HyprSubtext1,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

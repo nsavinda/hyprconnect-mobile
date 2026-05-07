@@ -17,17 +17,24 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -36,6 +43,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 @HiltViewModel
@@ -58,6 +66,32 @@ class FileTransferViewModel @Inject constructor(
     private val _transfers = MutableStateFlow<List<FileTransfer>>(emptyList())
     val transfers: StateFlow<List<FileTransfer>> = _transfers.asStateFlow()
 
+    private val canceledBatchIds = ConcurrentHashMap.newKeySet<String>()
+    private val canceledTransferIds = ConcurrentHashMap.newKeySet<String>()
+
+    private val _overallStartMs = MutableStateFlow<Long?>(null)
+    private val _overallEndMs = MutableStateFlow<Long?>(null)
+
+    private val tickFlow = flow {
+        while (true) {
+            emit(Unit)
+            delay(1000)
+        }
+    }
+
+    val overallElapsedMs: StateFlow<Long> = combine(
+        _overallStartMs,
+        _overallEndMs,
+        _transfers,
+        tickFlow
+    ) { start, end, _, _ ->
+        when {
+            start == null -> 0L
+            end != null -> (end - start).coerceAtLeast(0L)
+            else -> (System.currentTimeMillis() - start).coerceAtLeast(0L)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
     val batches: StateFlow<List<FolderBatch>> = _transfers
         .map { list -> aggregateBatches(list) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -73,7 +107,9 @@ class FileTransferViewModel @Inject constructor(
                 ((it.size.toDouble()) * it.progress.coerceIn(0f, 1f)).toLong()
             }
             val activeSpeed = files.filter { it.progress < 1f }.sumOf { it.speed }
-            val active = files.any { it.progress < 1f && !it.status.contains("Failed", true) && !it.status.contains("error", true) }
+            val active = files.any { isTransferActive(it) }
+            val startMs = files.mapNotNull { it.startMs }.minOrNull()
+            val endMs = if (!active) files.mapNotNull { it.endMs }.maxOrNull() else null
             FolderBatch(
                 id = id,
                 rootName = root,
@@ -82,7 +118,9 @@ class FileTransferViewModel @Inject constructor(
                 totalSize = totalSize,
                 transferredBytes = transferredBytes,
                 activeSpeed = activeSpeed,
-                active = active
+                active = active,
+                startMs = startMs,
+                endMs = endMs
             )
         }.sortedBy { it.rootName }
     }
@@ -92,10 +130,83 @@ class FileTransferViewModel @Inject constructor(
     // setting; in-flight uploads continue against the old semaphore.
     @Volatile private var gate: Semaphore = Semaphore(4)
 
+    // Priority-aware pending queue feeding a fixed pool of workers. Producers
+    // (folder walk, file picker) submitPending() as files are discovered;
+    // workers pick the next task using the current priority policy. The walk
+    // does NOT wait to enumerate all files — workers start consuming as soon
+    // as the first file is enqueued.
+    private val pendingMutex = Mutex()
+    private val pending = mutableListOf<PendingUpload>()
+    private val pendingSignal = Channel<Unit>(Channel.UNLIMITED)
+    private val balanceCounter = AtomicInteger(0)
+    @Volatile private var currentPriority: String = "off"
+    private val maxWorkers = 16
+
+    val activeCount: StateFlow<Int> = _transfers
+        .map { list -> list.count { isTransferActive(it) } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
     init {
         viewModelScope.launch {
             settingsRepository.maxConcurrentTransfers.collect { n ->
                 gate = Semaphore(n.coerceIn(1, 16))
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.transferPriority.collect { currentPriority = it }
+        }
+        repeat(maxWorkers) {
+            viewModelScope.launch(Dispatchers.IO) { workerLoop() }
+        }
+    }
+
+    private suspend fun workerLoop() {
+        while (true) {
+            val task = nextPending()
+            try {
+                runUpload(task)
+            } catch (e: Exception) {
+                Log.e(TAG, "Worker error: ${e.message}", e)
+            }
+        }
+    }
+
+    private suspend fun nextPending(): PendingUpload {
+        while (true) {
+            val task = pendingMutex.withLock {
+                if (pending.isEmpty()) null else removeBest()
+            }
+            if (task != null) return task
+            pendingSignal.receive()
+        }
+    }
+
+    private fun removeBest(): PendingUpload {
+        return when (currentPriority) {
+            "small" -> pending.removeAt(pending.indices.minBy { pending[it].fileSize })
+            "big" -> pending.removeAt(pending.indices.maxBy { pending[it].fileSize })
+            "balanced" -> {
+                val idx = if (balanceCounter.getAndIncrement() % 2 == 0)
+                    pending.indices.maxBy { pending[it].fileSize }
+                else
+                    pending.indices.minBy { pending[it].fileSize }
+                pending.removeAt(idx)
+            }
+            else -> pending.removeAt(0) // "off" — FIFO discovery order
+        }
+    }
+
+    private suspend fun submitPending(task: PendingUpload) {
+        pendingMutex.withLock { pending.add(task) }
+        pendingSignal.trySend(Unit)
+    }
+
+    private fun dropPendingForBatch(batchId: String) {
+        // Run on the same dispatcher as the rest; cancellation paths already
+        // hold the mutex briefly elsewhere.
+        viewModelScope.launch(Dispatchers.IO) {
+            pendingMutex.withLock {
+                pending.removeAll { it.batchId == batchId }
             }
         }
     }
@@ -149,6 +260,25 @@ class FileTransferViewModel @Inject constructor(
         enqueueUpload(context, uri, relativePath, batchId = null, batchRoot = null)
     }
 
+    fun cancelBatch(batchId: String) {
+        canceledBatchIds.add(batchId)
+        dropPendingForBatch(batchId)
+        val updated = _transfers.value.map { transfer ->
+            if (transfer.batchId == batchId && isTransferActive(transfer)) {
+                canceledTransferIds.add(transfer.id)
+                transfer.copy(
+                    status = "Canceled",
+                    speed = 0L,
+                    endMs = transfer.endMs ?: System.currentTimeMillis()
+                )
+            } else {
+                transfer
+            }
+        }
+        _transfers.value = updated
+        updateSessionCompletion(updated)
+    }
+
     private fun enqueueUpload(
         context: Context,
         uri: Uri,
@@ -173,99 +303,141 @@ class FileTransferViewModel @Inject constructor(
                 speed = 0L,
                 status = "Queued",
                 batchId = batchId,
-                batchRoot = batchRoot
+                batchRoot = batchRoot,
+                startMs = System.currentTimeMillis()
             )
-            _transfers.value += newTransfer
+            markSessionStart()
+            _transfers.value = _transfers.value + newTransfer
+
+            if (isCanceled(localId, batchId)) {
+                updateStatus(localId, "Canceled")
+                return@launch
+            }
 
             if (!client.isConnected.value) {
                 updateStatus(localId, "Not connected")
                 return@launch
             }
 
-            runUpload(context, uri, sentName, fileSize, localId, contentResolver)
+            submitPending(
+                PendingUpload(
+                    context = context,
+                    uri = uri,
+                    sentName = sentName,
+                    fileSize = fileSize,
+                    localId = localId,
+                    batchId = batchId,
+                    contentResolver = contentResolver
+                )
+            )
         }
     }
 
-    private suspend fun runUpload(
-        context: Context,
-        uri: Uri,
+    private suspend fun runUpload(task: PendingUpload) {
+        val context = task.context
+        val uri = task.uri
+        val sentName = task.sentName
+        val fileSize = task.fileSize
+        val localId = task.localId
+        val batchId = task.batchId
+        val contentResolver = task.contentResolver
+
+        try {
+            if (checkCanceled(localId, batchId)) return
+            val quicEnabled = settingsRepository.quicTransfer.first()
+
+            // gate covers offer + bulk data upload only. Finalize runs in a
+            // separate coroutine so the worker is free to pick up the next
+            // pending file the instant bytes are on the wire.
+            val gateResult: Pair<OfferResult, Boolean> = gate.withPermit {
+                if (checkCanceled(localId, batchId)) return
+                updateStatus(localId, "Starting")
+                val outcome = offerTransfer(sentName, fileSize, quicEnabled)
+                if (outcome is OfferOutcome.Failed) {
+                    updateStatus(localId, outcome.reason)
+                    return
+                }
+                val offer = (outcome as OfferOutcome.Success).result
+
+                if (checkCanceled(localId, batchId)) return
+
+                val quicOk = if (quicEnabled && offer.uploadToken != null && offer.quicPort != null) {
+                    sendViaQuic(
+                        context, uri, offer.uploadToken, offer.quicPort,
+                        localId, batchId, fileSize
+                    )
+                } else false
+
+                if (checkCanceled(localId, batchId)) return
+
+                val ok = if (quicOk) true else {
+                    val tcpOk = sendViaTcpChunks(
+                        context, uri, offer.transferId, localId, batchId, fileSize
+                    )
+                    if (!tcpOk) return
+                    false
+                }
+                offer to ok
+            }
+
+            val (offer, dataOk) = gateResult
+
+            if (checkCanceled(localId, batchId)) return
+
+            // Hand off finalize to a background coroutine. The worker returns
+            // immediately to consume the next priority task.
+            viewModelScope.launch(Dispatchers.IO) {
+                finalizeUpload(offer, sentName, fileSize, localId, batchId, contentResolver, uri, dataOk)
+            }
+        } catch (e: Exception) {
+            updateStatus(localId, "Failed: ${e.message}")
+        }
+    }
+
+    private suspend fun finalizeUpload(
+        offer: OfferResult,
         sentName: String,
         fileSize: Long,
         localId: String,
-        contentResolver: ContentResolver
+        batchId: String?,
+        contentResolver: ContentResolver,
+        uri: Uri,
+        dataOk: Boolean
     ) {
-            try {
-                val quicEnabled = settingsRepository.quicTransfer.first()
+        try {
+            updateStatus(localId, "Finalizing")
+            updateProgress(localId, 1f, 0L)
 
-                // Snapshot the current gate; if the user changes the setting
-                // mid-batch this upload still uses the semaphore it acquired.
-                // The permit only covers offer + bulk data upload — finalize
-                // (file.complete) runs unbounded so finished uploads don't
-                // block new ones from starting while the daemon hashes/renames.
-                val gateResult: Pair<OfferResult, Boolean> = gate.withPermit {
-                    updateStatus(localId, "Starting")
-                    val outcome = offerTransfer(sentName, fileSize, quicEnabled)
-                    if (outcome is OfferOutcome.Failed) {
-                        updateStatus(localId, outcome.reason)
-                        return
-                    }
-                    val offer = (outcome as OfferOutcome.Success).result
-
-                    val quicOk = if (quicEnabled && offer.uploadToken != null && offer.quicPort != null) {
-                        sendViaQuic(
-                            context, uri, offer.uploadToken, offer.quicPort,
-                            localId, fileSize
-                        )
-                    } else false
-
-                    val ok = if (quicOk) true else {
-                        val tcpOk = sendViaTcpChunks(
-                            context, uri, offer.transferId, localId, fileSize
-                        )
-                        if (!tcpOk) return
-                        false
-                    }
-                    offer to ok
-                }
-
-                val (offer, dataOk) = gateResult
-
-                updateStatus(localId, "Finalizing")
-                // Reset speed so the aggregate isn't padded by stale samples
-                // while we're just waiting on the daemon's hash check.
-                updateProgress(localId, 1f, 0L)
-
-                // Compute hash for verification.
-                val hashHex = computeHash(contentResolver, uri, fileSize)
-
-                val finalizeResult = completeTransfer(offer.transferId, sentName, hashHex)
-                val completed = when (finalizeResult) {
-                    FinalizeOutcome.SUCCESS -> true
-                    FinalizeOutcome.ERROR -> false
-                    FinalizeOutcome.TIMEOUT -> {
-                        when (completeTransfer(offer.transferId, sentName, hashHex)) {
-                            FinalizeOutcome.SUCCESS -> true
-                            FinalizeOutcome.ERROR -> false
-                            FinalizeOutcome.TIMEOUT -> {
-                                updateProgress(localId, 1f, 0L)
-                                updateStatus(localId, "Completed (confirmation timeout)")
-                                true
-                            }
+            val hashHex = computeHash(contentResolver, uri, fileSize)
+            val finalizeResult = completeTransfer(offer.transferId, sentName, hashHex)
+            val completed = when (finalizeResult) {
+                FinalizeOutcome.SUCCESS -> true
+                FinalizeOutcome.ERROR -> false
+                FinalizeOutcome.TIMEOUT -> {
+                    when (completeTransfer(offer.transferId, sentName, hashHex)) {
+                        FinalizeOutcome.SUCCESS -> true
+                        FinalizeOutcome.ERROR -> false
+                        FinalizeOutcome.TIMEOUT -> {
+                            updateProgress(localId, 1f, 0L)
+                            updateStatus(localId, "Completed (confirmation timeout)")
+                            true
                         }
                     }
                 }
-
-                if (!completed) {
-                    updateStatus(localId, "Finalize failed")
-                    return
-                }
-
-                val method = if (dataOk) "QUIC" else "TCP"
-                updateProgress(localId, 1f, 0L)
-                updateStatus(localId, "Completed ($method)")
-            } catch (e: Exception) {
-                updateStatus(localId, "Failed: ${e.message}")
             }
+
+            if (checkCanceled(localId, batchId)) return
+            if (!completed) {
+                updateStatus(localId, "Finalize failed")
+                return
+            }
+
+            val method = if (dataOk) "QUIC" else "TCP"
+            updateProgress(localId, 1f, 0L)
+            updateStatus(localId, "Completed ($method)")
+        } catch (e: Exception) {
+            updateStatus(localId, "Failed: ${e.message}")
+        }
     }
 
     /**
@@ -278,8 +450,10 @@ class FileTransferViewModel @Inject constructor(
         uploadToken: String,
         quicPort: Int,
         localId: String,
+        batchId: String?,
         fileSize: Long
     ): Boolean {
+        if (checkCanceled(localId, batchId)) return false
         val host = client.connectedHost ?: return false
         Log.d(TAG, "Attempting QUIC upload to $host:$quicPort")
         updateStatus(localId, "Uploading (QUIC)")
@@ -294,6 +468,7 @@ class FileTransferViewModel @Inject constructor(
             uri = uri,
             fileSize = fileSize,
             contentResolver = context.contentResolver,
+            shouldCancel = { isCanceled(localId, batchId) },
             onProgress = { bytesSent ->
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastUpdateTime >= 500) {
@@ -312,6 +487,11 @@ class FileTransferViewModel @Inject constructor(
             return true
         }
 
+        if (isCanceled(localId, batchId) || result.error == "Canceled") {
+            updateStatus(localId, "Canceled")
+            return false
+        }
+
         Log.w(TAG, "QUIC upload failed: ${result.error}, falling back to TCP")
         updateStatus(localId, "QUIC failed, using TCP")
         return false
@@ -322,8 +502,10 @@ class FileTransferViewModel @Inject constructor(
         uri: Uri,
         transferId: String,
         localId: String,
+        batchId: String?,
         fileSize: Long
     ): Boolean {
+        if (checkCanceled(localId, batchId)) return false
         val contentResolver = context.contentResolver
         var bytesSent = 0L
         var lastUpdateTime = System.currentTimeMillis()
@@ -338,6 +520,7 @@ class FileTransferViewModel @Inject constructor(
             val buffer = ByteArray(chunkSize)
             var offset = 0L
             while (true) {
+                if (checkCanceled(localId, batchId)) return false
                 val read = input.read(buffer)
                 if (read <= 0) break
 
@@ -487,15 +670,69 @@ class FileTransferViewModel @Inject constructor(
     }
 
     private fun updateStatus(id: String, status: String) {
-        _transfers.value = _transfers.value.map {
-            if (it.id == id) it.copy(status = status, speed = 0L) else it
+        val updated = _transfers.value.map {
+            if (it.id == id) {
+                val endMs = if (isTerminalStatus(status)) it.endMs ?: System.currentTimeMillis() else it.endMs
+                it.copy(status = status, speed = 0L, endMs = endMs)
+            } else {
+                it
+            }
         }
+        _transfers.value = updated
+        updateSessionCompletion(updated)
     }
 
     private fun updateProgress(id: String, progress: Float, speed: Long) {
-        _transfers.value = _transfers.value.map {
+        val updated = _transfers.value.map {
             if (it.id == id) it.copy(progress = progress, speed = speed) else it
         }
+        _transfers.value = updated
+        updateSessionCompletion(updated)
+    }
+
+    private fun markSessionStart() {
+        if (_overallStartMs.value == null || _overallEndMs.value != null) {
+            _overallStartMs.value = System.currentTimeMillis()
+            _overallEndMs.value = null
+        }
+    }
+
+    private fun updateSessionCompletion(transfers: List<FileTransfer>) {
+        val anyActive = transfers.any { isTransferActive(it) }
+        if (!anyActive && _overallStartMs.value != null && _overallEndMs.value == null) {
+            _overallEndMs.value = System.currentTimeMillis()
+        }
+    }
+
+    private fun isTransferActive(transfer: FileTransfer): Boolean {
+        if (transfer.progress >= 1f) return false
+        val status = transfer.status.lowercase()
+        if (status.startsWith("completed")) return false
+        if (status.contains("failed") || status.contains("error") || status.contains("not connected") || status.contains("canceled")) {
+            return false
+        }
+        return true
+    }
+
+    private fun isTerminalStatus(status: String): Boolean {
+        val normalized = status.lowercase()
+        return normalized.startsWith("completed") ||
+            normalized.contains("failed") ||
+            normalized.contains("error") ||
+            normalized.contains("not connected") ||
+            normalized.contains("canceled")
+    }
+
+    private fun isCanceled(localId: String, batchId: String?): Boolean {
+        return canceledTransferIds.contains(localId) || (batchId != null && canceledBatchIds.contains(batchId))
+    }
+
+    private fun checkCanceled(localId: String, batchId: String?): Boolean {
+        if (isCanceled(localId, batchId)) {
+            updateStatus(localId, "Canceled")
+            return true
+        }
+        return false
     }
 
     private fun queryDisplayName(contentResolver: ContentResolver, uri: Uri): String? {
@@ -521,6 +758,16 @@ class FileTransferViewModel @Inject constructor(
     }
 }
 
+private data class PendingUpload(
+    val context: Context,
+    val uri: Uri,
+    val sentName: String,
+    val fileSize: Long,
+    val localId: String,
+    val batchId: String?,
+    val contentResolver: ContentResolver
+)
+
 data class FileTransfer(
     val id: String,
     val name: String,
@@ -530,7 +777,9 @@ data class FileTransfer(
     val isIncoming: Boolean,
     val status: String = "Transferring",
     val batchId: String? = null,
-    val batchRoot: String? = null
+    val batchRoot: String? = null,
+    val startMs: Long? = null,
+    val endMs: Long? = null
 )
 
 data class FolderBatch(
@@ -541,5 +790,7 @@ data class FolderBatch(
     val totalSize: Long,
     val transferredBytes: Long,
     val activeSpeed: Long,
-    val active: Boolean
+    val active: Boolean,
+    val startMs: Long? = null,
+    val endMs: Long? = null
 )
