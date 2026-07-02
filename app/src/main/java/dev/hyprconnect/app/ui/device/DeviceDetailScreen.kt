@@ -1,9 +1,10 @@
 package dev.hyprconnect.app.ui.device
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -14,14 +15,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.hyprconnect.app.domain.model.DeviceStatus
+import dev.hyprconnect.app.domain.model.Workspace
 import dev.hyprconnect.app.ui.theme.*
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -251,15 +259,11 @@ fun DeviceDetailScreen(
                                 )
                             }
                         }
-                    } else {
-                        items(workspaces, key = { it.id }) { workspace ->
-                            WorkspaceCard(
-                                id       = workspace.id,
-                                name     = workspace.name,
-                                windows  = workspace.windows,
-                                monitor  = workspace.monitor,
-                                isActive = workspace.isActive,
-                                onClick  = { viewModel.switchWorkspace(workspace.id) }
+                    } else if (workspaces.isNotEmpty()) {
+                        item {
+                            WorkspacesByDesktop(
+                                workspaces = workspaces,
+                                onSwitch   = { viewModel.switchWorkspace(it) }
                             )
                         }
                     }
@@ -361,84 +365,237 @@ private fun HyprSliderCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Workspaces split into one column per desktop (Hyprland monitor). Each
+ * column is headed by the monitor name and stacks its workspaces vertically;
+ * columns sit side by side and the page scrolls vertically when a column is
+ * tall. Within a column, workspaces can be reordered by long-pressing and
+ * dragging up/down. A short tap switches to a workspace.
+ *
+ * Grouping preserves the monitor order in which workspaces first appear.
+ */
 @Composable
-private fun WorkspaceCard(
+private fun WorkspacesByDesktop(
+    workspaces: List<Workspace>,
+    onSwitch: (Int) -> Unit,
+) {
+    val groups = remember(workspaces) {
+        // LinkedHashMap semantics via groupBy preserve first-seen monitor order.
+        workspaces.groupBy { it.monitor?.takeIf(String::isNotBlank) ?: "unknown" }.toList()
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            "long-press to reorder within a desktop · tap to switch",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            color = HyprOverlay0,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            groups.forEach { (monitor, wss) ->
+                DesktopColumn(
+                    monitor = monitor,
+                    workspaces = wss,
+                    onSwitch = onSwitch,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A single desktop's workspaces as a vertically stacked, reorderable column.
+ * Order is session-only: it re-syncs to the incoming order whenever this
+ * desktop's set of workspaces changes (e.g. on Refresh). Layout uses absolute
+ * vertical offsets over a fixed cell height, so the dragged cell floats above
+ * the others and drag hit-testing is exact.
+ */
+@Composable
+private fun DesktopColumn(
+    monitor: String,
+    workspaces: List<Workspace>,
+    onSwitch: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val spacing = 8.dp
+    val cellHeight = 74.dp
+
+    val order = remember { mutableStateListOf<Workspace>() }
+    // Stable holders so the one-shot pointerInput closures read current values.
+    val draggingSlot = remember { mutableStateOf<Int?>(null) }
+    val pointerY = remember { mutableStateOf(0f) } // finger Y in local px
+    val grabY = remember { mutableStateOf(0f) }    // finger offset within grabbed cell
+
+    LaunchedEffect(workspaces) {
+        val incomingIds = workspaces.map { it.id }
+        val currentIds = order.map { it.id }
+        if (incomingIds.toSet() == currentIds.toSet() && order.isNotEmpty()) {
+            val byId = workspaces.associateBy { it.id }
+            val refreshed = order.mapNotNull { byId[it.id] }
+            order.clear(); order.addAll(refreshed)
+        } else {
+            order.clear(); order.addAll(workspaces)
+        }
+    }
+
+    Column(modifier) {
+        Text(
+            text = monitor,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium,
+            fontSize = 11.sp,
+            color = HyprBlue,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+
+        val n = order.size
+        val colHeight = if (n == 0) 0.dp else cellHeight * n + spacing * (n - 1)
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(colHeight)
+                .pointerInput(n) {
+                    detectTapGestures(onTap = { p ->
+                        val step = (cellHeight + spacing).toPx()
+                        val idx = (p.y / step).toInt()
+                        val within = p.y - idx * step <= cellHeight.toPx()
+                        if (within && idx in 0 until order.size) onSwitch(order[idx].id)
+                    })
+                }
+                .pointerInput(n) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { start ->
+                            val step = (cellHeight + spacing).toPx()
+                            val slot = (start.y / step).toInt().coerceIn(0, order.size - 1)
+                            draggingSlot.value = slot
+                            pointerY.value = start.y
+                            grabY.value = start.y - slot * step
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            val from = draggingSlot.value
+                            if (from != null) {
+                                pointerY.value += amount.y
+                                val step = (cellHeight + spacing).toPx()
+                                val target = (pointerY.value / step).toInt().coerceIn(0, order.size - 1)
+                                if (target != from) {
+                                    order.add(target, order.removeAt(from))
+                                    draggingSlot.value = target
+                                }
+                            }
+                        },
+                        onDragEnd = { draggingSlot.value = null },
+                        onDragCancel = { draggingSlot.value = null },
+                    )
+                }
+        ) {
+            order.forEachIndexed { slot, ws ->
+                val dragging = draggingSlot.value == slot
+                val baseY = (cellHeight + spacing) * slot
+
+                val cellModifier = if (dragging) {
+                    Modifier
+                        .zIndex(1f)
+                        .offset { IntOffset(0, (pointerY.value - grabY.value).roundToInt()) }
+                        .scale(1.03f)
+                        .shadow(8.dp, RoundedCornerShape(10.dp))
+                } else {
+                    Modifier.offset(y = baseY)
+                }
+
+                Box(cellModifier.fillMaxWidth().height(cellHeight)) {
+                    WorkspaceGridCell(
+                        id = ws.id,
+                        name = ws.name,
+                        windows = ws.windows,
+                        isActive = ws.isActive,
+                        lifted = dragging
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceGridCell(
     id: Int,
     name: String,
     windows: Int,
-    monitor: String?,
     isActive: Boolean,
-    onClick: () -> Unit
+    lifted: Boolean,
 ) {
     Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         colors = CardDefaults.cardColors(
             containerColor = if (isActive) HyprBlueContainer else HyprGlass
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
+        border = androidx.compose.foundation.BorderStroke(
+            if (isActive || lifted) 1.dp else 0.5.dp,
+            if (isActive || lifted) HyprBlue else HyprGlassBorder
+        ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp, 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Workspace number badge
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isActive) HyprBlue.copy(alpha = 0.2f) else HyprGlassDeep),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "$id",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = if (isActive) HyprBlue else HyprSubtext0
-                )
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isActive) HyprBlue.copy(alpha = 0.2f) else HyprGlassDeep),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "$id",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = if (isActive) HyprBlue else HyprSubtext0
+                    )
+                }
+                if (isActive) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(HyprBlue)
+                    )
+                }
             }
 
-            Spacer(Modifier.width(12.dp))
-
-            Column(Modifier.weight(1f)) {
+            Column {
                 Text(
                     text = name,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (isActive) HyprText else HyprSubtext1
+                    color = if (isActive) HyprText else HyprSubtext1,
+                    maxLines = 1
                 )
                 Text(
-                    text = buildString {
-                        append("$windows Window${if (windows != 1) "s" else ""}")
-                        if (!monitor.isNullOrBlank()) append(" · $monitor")
-                    },
+                    text = "$windows win${if (windows != 1) "s" else ""}",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = HyprOverlay0
                 )
-            }
-
-            if (isActive) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(HyprBlue.copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        "Active",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        color = HyprBlue
-                    )
-                }
             }
         }
     }
