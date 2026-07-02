@@ -11,8 +11,13 @@ interface DeviceRepository {
     
     fun startDiscovery()
     fun stopDiscovery()
-    /** Returns the pairing device_id assigned by the daemon, or null on failure. */
-    suspend fun pairDevice(device: Device): String?
+    /**
+     * Initiates the pairing handshake. On success the daemon returns the
+     * pairing session's device_id and the SAS (Short Authentication String)
+     * that the user must visually verify against the desktop. Returns null
+     * on connection failure.
+     */
+    suspend fun pairDevice(device: Device): PairingSession?
     /**
      * Drops local pairing for [deviceId]. When [notifyPeer] is true (the
      * default), best-effort notifies the desktop so it removes its trusted
@@ -42,3 +47,10 @@ interface DeviceRepository {
     suspend fun inputKeyboardType(text: String): Boolean
     suspend fun inputKeyboardKey(key: String, modifiers: List<String> = emptyList()): Boolean
 }
+
+/** Session returned by [DeviceRepository.pairDevice]. */
+data class PairingSession(
+    val deviceId: String,
+    /** 6-digit SAS — both sides display this for visual comparison. */
+    val sas: String
+)

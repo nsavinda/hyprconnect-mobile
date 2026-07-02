@@ -1,6 +1,8 @@
 package dev.hyprconnect.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -30,7 +32,8 @@ fun VerificationCodeDisplay(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(HyprSurface0),
+                    .background(HyprGlass)
+                    .border(BorderStroke(0.5.dp, HyprGlassBorder), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 // Glow accent bar at top

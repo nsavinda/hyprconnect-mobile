@@ -68,8 +68,9 @@ fun HyprConnectTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = HyprMantle.toArgb()
-            window.navigationBarColor = HyprMantle.toArgb()
+            // Transparent system bars so the gradient backdrop bleeds edge to edge.
+            window.statusBarColor = Color.Transparent.toArgb()
+            window.navigationBarColor = Color.Transparent.toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }

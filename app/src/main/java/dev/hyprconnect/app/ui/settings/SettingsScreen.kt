@@ -2,12 +2,10 @@ package dev.hyprconnect.app.ui.settings
 
 import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import dev.hyprconnect.app.service.HyprConnectAccessibilityService
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,10 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,35 +41,26 @@ fun SettingsScreen(
     val clipboardSync  by viewModel.clipboardSync.collectAsState()
     val quicTransfer   by viewModel.quicTransfer.collectAsState()
     val maxConcurrent  by viewModel.maxConcurrentTransfers.collectAsState()
-    val transferPriority by viewModel.transferPriority.collectAsState()
     var showClearDialog by remember { mutableStateOf(false) }
 
     // Re-check on every resume so indicators update after returning from system settings.
     var canDrawOverApps by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var accessibilityEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
-    var hasClipboardPermission by remember {
-        mutableStateOf(context.checkSelfPermission("android.permission.READ_CLIPBOARD_IN_BACKGROUND")
-                == PackageManager.PERMISSION_GRANTED)
-    }
-    val autoSyncActive = hasClipboardPermission || accessibilityEnabled
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             canDrawOverApps = Settings.canDrawOverlays(context)
             accessibilityEnabled = isAccessibilityServiceEnabled(context)
-            hasClipboardPermission = context.checkSelfPermission(
-                "android.permission.READ_CLIPBOARD_IN_BACKGROUND"
-            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            containerColor = HyprSurface0,
+            containerColor = HyprGlassDeep,
             shape = RoundedCornerShape(18.dp),
             title = {
                 Text(
-                    "clear app data",
+                    "Clear App Data",
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = HyprText
@@ -94,7 +81,7 @@ fun SettingsScreen(
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = HyprPink)
                 ) {
-                    Text("clear", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    Text("Clear", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -102,19 +89,19 @@ fun SettingsScreen(
                     onClick = { showClearDialog = false },
                     colors = ButtonDefaults.textButtonColors(contentColor = HyprSubtext1)
                 ) {
-                    Text("cancel", fontFamily = FontFamily.Monospace)
+                    Text("Cancel", fontFamily = FontFamily.Monospace)
                 }
             }
         )
     }
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "settings",
+                        "Settings",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = HyprText
@@ -125,7 +112,7 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = HyprSubtext1)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -138,17 +125,19 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Device information section
-            item { SectionLabel("// device") }
+            item { SectionLabel("// Device") }
 
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+                    colors = CardDefaults.cardColors(containerColor = HyprGlass),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
                     shape  = RoundedCornerShape(14.dp)
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
-                            "device name",
+                            "Device Name",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = HyprSubtext0
@@ -165,10 +154,10 @@ fun SettingsScreen(
                             ),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor   = HyprBlue,
-                                unfocusedBorderColor = HyprSurface2,
+                                unfocusedBorderColor = HyprGlassBorder,
                                 cursorColor          = HyprBlue,
-                                focusedContainerColor   = HyprMantle,
-                                unfocusedContainerColor = HyprMantle
+                                focusedContainerColor   = HyprGlassDeep,
+                                unfocusedContainerColor = HyprGlassDeep
                             ),
                             shape = RoundedCornerShape(10.dp)
                         )
@@ -179,12 +168,14 @@ fun SettingsScreen(
             item { Spacer(Modifier.height(4.dp)) }
 
             // Features section
-            item { SectionLabel("// features") }
+            item { SectionLabel("// Features") }
 
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+                    colors = CardDefaults.cardColors(containerColor = HyprGlass),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
                     shape  = RoundedCornerShape(14.dp)
                 ) {
                     Column {
@@ -213,14 +204,14 @@ fun SettingsScreen(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        "accessibility service",
+                                        "Accessibility Service",
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 12.sp,
                                         color = if (accessibilityEnabled) HyprGreen else HyprSubtext1
                                     )
                                     Text(
-                                        if (accessibilityEnabled) "background clipboard sync active"
-                                        else "enable for automatic background sync (recommended)",
+                                        if (accessibilityEnabled) "Background Clipboard Sync Active"
+                                        else "Enable for Automatic Background Sync (Recommended)",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = HyprSubtext0
                                     )
@@ -233,7 +224,7 @@ fun SettingsScreen(
                                         },
                                         colors = ButtonDefaults.textButtonColors(contentColor = HyprBlue)
                                     ) {
-                                        Text("enable", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                        Text("Enable", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -249,14 +240,14 @@ fun SettingsScreen(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        "display over other apps",
+                                        "Display Over Other Apps",
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 12.sp,
                                         color = if (canDrawOverApps) HyprGreen else HyprSubtext1
                                     )
                                     Text(
-                                        if (canDrawOverApps) "overlay fallback active"
-                                        else "fallback if accessibility is unavailable",
+                                        if (canDrawOverApps) "Overlay Fallback Active"
+                                        else "Fallback if Accessibility is Unavailable",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = HyprSubtext0
                                     )
@@ -272,7 +263,7 @@ fun SettingsScreen(
                                         },
                                         colors = ButtonDefaults.textButtonColors(contentColor = HyprSubtext1)
                                     ) {
-                                        Text("grant", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                        Text("Grant", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -281,65 +272,17 @@ fun SettingsScreen(
                 }
             }
 
-            if (clipboardSync && !hasClipboardPermission) {
-                item {
-                    val adbCommand = "adb shell pm grant dev.hyprconnect.app android.permission.READ_CLIPBOARD_IN_BACKGROUND"
-                    val clipManager = LocalClipboardManager.current
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = HyprSurface0),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(
-                                "background sync blocked",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = HyprPink
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "Grant via ADB for automatic background sync (Samsung / strict Android):",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = HyprSubtext1
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(HyprMantle)
-                                    .clickable { clipManager.setText(AnnotatedString(adbCommand)) }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    adbCommand,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp,
-                                    color = HyprGreen
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                "tap to copy",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = HyprSubtext0
-                            )
-                        }
-                    }
-                }
-            }
-
             item { Spacer(Modifier.height(4.dp)) }
 
             // Transfer section
-            item { SectionLabel("// transfer") }
+            item { SectionLabel("// Transfer") }
 
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+                    colors = CardDefaults.cardColors(containerColor = HyprGlass),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
                     shape  = RoundedCornerShape(14.dp)
                 ) {
                     Column {
@@ -351,24 +294,11 @@ fun SettingsScreen(
                         )
                         HyprDivider()
                         HyprStepperItem(
-                            title = "Max concurrent transfers",
-                            description = "Files uploaded in parallel from a folder",
+                            title = "Max Concurrent Transfers",
+                            description = "Files Uploaded in Parallel From a Folder",
                             value = maxConcurrent,
                             range = 1..16,
                             onValueChange = { viewModel.setMaxConcurrentTransfers(it) }
-                        )
-                        HyprDivider()
-                        HyprChoiceItem(
-                            title = "Transfer priority",
-                            description = "Order in which folder files are picked up",
-                            value = transferPriority,
-                            options = listOf(
-                                "off" to "off",
-                                "small" to "small first",
-                                "big" to "big first",
-                                "balanced" to "balanced"
-                            ),
-                            onValueChange = { viewModel.setTransferPriority(it) }
                         )
                     }
                 }
@@ -377,12 +307,14 @@ fun SettingsScreen(
             item { Spacer(Modifier.height(4.dp)) }
 
             // About section
-            item { SectionLabel("// about") }
+            item { SectionLabel("// About") }
 
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+                    colors = CardDefaults.cardColors(containerColor = HyprGlass),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
                     shape  = RoundedCornerShape(14.dp)
                 ) {
                     Row(
@@ -393,7 +325,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "version",
+                            "Version",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 13.sp,
                             color = HyprSubtext1
@@ -418,7 +350,7 @@ fun SettingsScreen(
             item { Spacer(Modifier.height(4.dp)) }
 
             // Danger zone
-            item { SectionLabel("// data") }
+            item { SectionLabel("// Data") }
 
             item {
                 OutlinedButton(
@@ -429,7 +361,7 @@ fun SettingsScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, HyprPink.copy(alpha = 0.5f))
                 ) {
                     Text(
-                        "clear app data",
+                        "Clear App Data",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium
                     )
@@ -470,58 +402,6 @@ private fun HyprDivider() {
     )
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun HyprChoiceItem(
-    title: String,
-    description: String,
-    value: String,
-    options: List<Pair<String, String>>,
-    onValueChange: (String) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-    ) {
-        Text(
-            title,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = HyprText
-        )
-        Text(
-            description,
-            style = MaterialTheme.typography.bodySmall,
-            color = HyprSubtext0
-        )
-        Spacer(Modifier.height(10.dp))
-        androidx.compose.foundation.layout.FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            options.forEach { (key, label) ->
-                val selected = key == value
-                Surface(
-                    color = if (selected) HyprBlueContainer else HyprMantle,
-                    shape = RoundedCornerShape(8.dp),
-                    onClick = { onValueChange(key) }
-                ) {
-                    Text(
-                        text = label,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) HyprBlue else HyprSubtext1,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun HyprStepperItem(
     title: String,
@@ -556,7 +436,7 @@ private fun HyprStepperItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .background(HyprMantle)
+                .background(HyprGlassDeep)
         ) {
             TextButton(
                 onClick = { if (value > range.first) onValueChange(value - 1) },

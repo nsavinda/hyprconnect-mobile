@@ -45,7 +45,9 @@ fun DeviceCard(
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+        colors = CardDefaults.cardColors(containerColor = HyprGlass),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
         shape  = RoundedCornerShape(14.dp)
     ) {
         Row(
@@ -109,11 +111,11 @@ fun DeviceCard(
                     Spacer(Modifier.width(5.dp))
                     Text(
                         text = when (device.status) {
-                            is DeviceStatus.Connected    -> "connected"
-                            is DeviceStatus.Connecting   -> "connecting..."
-                            is DeviceStatus.Pairing      -> "pairing..."
-                            is DeviceStatus.Disconnected -> "disconnected"
-                            is DeviceStatus.Error        -> "error"
+                            is DeviceStatus.Connected    -> "Connected"
+                            is DeviceStatus.Connecting   -> "Connecting..."
+                            is DeviceStatus.Pairing      -> "Pairing..."
+                            is DeviceStatus.Disconnected -> "Disconnected"
+                            is DeviceStatus.Error        -> "Error"
                         },
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,

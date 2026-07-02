@@ -58,12 +58,12 @@ fun RemoteInputScreen(
     }
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "remote input",
+                        "Remote Input",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = HyprText
@@ -83,7 +83,7 @@ fun RemoteInputScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -99,7 +99,7 @@ fun RemoteInputScreen(
                     .weight(1f)
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
-                    .background(HyprMantle)
+                    .background(HyprGlassDeep)
                     .pointerInteropFilter { event ->
                         when (event.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
@@ -177,14 +177,14 @@ fun RemoteInputScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "touchpad",
+                        "Touchpad",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
                         color = HyprOverlay0.copy(alpha = 0.4f)
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "tap · 2-finger tap · 2-finger drag",
+                        "Tap · 2-Finger Tap · 2-Finger Drag",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
                         color = HyprOverlay0.copy(alpha = 0.25f)
@@ -209,7 +209,7 @@ fun RemoteInputScreen(
                 MouseButton(
                     label = "Mid",
                     modifier = Modifier.weight(0.6f),
-                    containerColor = HyprSurface0,
+                    containerColor = HyprGlass,
                     contentColor = HyprSubtext1,
                     onClick = { viewModel.sendClick("middle") }
                 )
@@ -240,7 +240,7 @@ fun RemoteInputScreen(
                         .focusRequester(focusRequester)
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(HyprSurface0)
+                        .background(HyprGlass)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     textStyle = MaterialTheme.typography.bodyMedium.copy(
                         color = HyprText,
@@ -250,7 +250,7 @@ fun RemoteInputScreen(
                     decorationBox = { innerTextField ->
                         if (textFieldValue.text.isEmpty()) {
                             Text(
-                                "type here...",
+                                "Type Here...",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = HyprOverlay0,
                                 fontFamily = FontFamily.Monospace

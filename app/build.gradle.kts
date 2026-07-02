@@ -92,6 +92,11 @@ dependencies {
     // DocumentFile for SAF folder traversal
     implementation(libs.androidx.documentfile)
 
+    // JmDNS — userspace mDNS implementation. Used instead of NsdManager
+    // because MIUI / Mediatek devices on Android <12 silently filter the
+    // platform mDNS path even with MulticastLock held.
+    implementation("org.jmdns:jmdns:3.5.12")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

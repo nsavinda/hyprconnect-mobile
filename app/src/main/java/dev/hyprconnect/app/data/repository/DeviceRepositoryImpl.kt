@@ -11,6 +11,7 @@ import dev.hyprconnect.app.domain.model.DeviceType
 import dev.hyprconnect.app.domain.model.NowPlaying
 import dev.hyprconnect.app.domain.model.Workspace
 import dev.hyprconnect.app.domain.repository.DeviceRepository
+import dev.hyprconnect.app.domain.repository.PairingSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,56 +83,44 @@ class DeviceRepositoryImpl @Inject constructor(
         _discoveredDevices.value = emptyList()
     }
 
-    override suspend fun pairDevice(device: Device): String? {
+    override suspend fun pairDevice(device: Device): PairingSession? {
         currentPairingDevice = device
         var pairingTarget = device
 
-        // If we're already connected to this host from a previous attempt, skip the
-        // TLS handshake so we don't generate a second pairing code on the server.
+        // If we're already connected to this host from a previous attempt,
+        // skip the TLS handshake — the daemon reuses the existing pending
+        // record (and its SAS) when the same device_name re-requests.
         val alreadyConnected = client.isConnected.value &&
             client.connectedHost == pairingTarget.host
-        if (alreadyConnected) {
+        if (!alreadyConnected) {
+            val resolvedHost = tryConnectAlternates(pairingTarget, trustAll = true)
+            if (resolvedHost == null) {
+                val refreshed = findRefreshedDeviceTarget(device)
+                if (refreshed == null) {
+                    Log.e(TAG, "Failed to connect for pairing")
+                    return null
+                }
+
+                Log.w(
+                    TAG,
+                    "Retrying pairing connection with refreshed endpoint ${refreshed.host}:${refreshed.port} (was ${pairingTarget.host}:${pairingTarget.port})"
+                )
+                pairingTarget = refreshed
+                currentPairingDevice = refreshed
+
+                val refreshedHost = tryConnectAlternates(pairingTarget, trustAll = true)
+                if (refreshedHost == null) {
+                    Log.e(TAG, "Failed to connect for pairing after refresh retry")
+                    return null
+                }
+                pairingTarget = pairingTarget.copy(host = refreshedHost)
+                currentPairingDevice = pairingTarget
+            } else if (resolvedHost != pairingTarget.host) {
+                pairingTarget = pairingTarget.copy(host = resolvedHost)
+                currentPairingDevice = pairingTarget
+            }
+        } else {
             Log.d(TAG, "Already connected to ${pairingTarget.host}, reusing connection for pair.request")
-            val pairingDeviceName = android.os.Build.MODEL
-            val selfCert = certificateStore.getSelfCertificate()
-            val encodedCert = java.util.Base64.getEncoder().encodeToString(selfCert.encoded)
-            val pairRequest = JsonRpcRequest(
-                method = "pair.request",
-                params = buildJsonObject {
-                    put("cert", encodedCert)
-                    put("device_name", pairingDeviceName)
-                    put("device_type", "phone")
-                },
-                id = 1
-            )
-            return if (client.sendRequest(pairRequest)) pairingDeviceName else null
-        }
-
-        val resolvedHost = tryConnectAlternates(pairingTarget, trustAll = true)
-        if (resolvedHost == null) {
-            val refreshed = findRefreshedDeviceTarget(device)
-            if (refreshed == null) {
-                Log.e(TAG, "Failed to connect for pairing")
-                return null
-            }
-
-            Log.w(
-                TAG,
-                "Retrying pairing connection with refreshed endpoint ${refreshed.host}:${refreshed.port} (was ${pairingTarget.host}:${pairingTarget.port})"
-            )
-            pairingTarget = refreshed
-            currentPairingDevice = refreshed
-
-            val refreshedHost = tryConnectAlternates(pairingTarget, trustAll = true)
-            if (refreshedHost == null) {
-                Log.e(TAG, "Failed to connect for pairing after refresh retry")
-                return null
-            }
-            pairingTarget = pairingTarget.copy(host = refreshedHost)
-            currentPairingDevice = pairingTarget
-        } else if (resolvedHost != pairingTarget.host) {
-            pairingTarget = pairingTarget.copy(host = resolvedHost)
-            currentPairingDevice = pairingTarget
         }
 
         val selfCert = certificateStore.getSelfCertificate()
@@ -148,12 +137,28 @@ class DeviceRepositoryImpl @Inject constructor(
             id = 1
         )
 
-        val sent = client.sendRequest(pairRequest)
-        if (sent) {
-            Log.d(TAG, "Pairing request sent to ${pairingTarget.name} at ${pairingTarget.host}:${pairingTarget.port}, pairingDeviceId=$pairingDeviceName")
-            return pairingDeviceName
+        val response = client.sendRequestAwait(pairRequest)
+        if (response == null) {
+            Log.e(TAG, "No response to pair.request")
+            return null
         }
-        return null
+        if (response.error != null) {
+            Log.e(TAG, "pair.request error: ${response.error.message}")
+            return null
+        }
+        val result = response.result as? JsonObject
+        if (result == null) {
+            Log.e(TAG, "pair.request returned no result object")
+            return null
+        }
+        val deviceId = result["device_id"]?.jsonPrimitive?.contentOrNull ?: pairingDeviceName
+        val sas = result["sas"]?.jsonPrimitive?.contentOrNull
+        if (sas.isNullOrBlank()) {
+            Log.e(TAG, "pair.request response missing SAS")
+            return null
+        }
+        Log.d(TAG, "Pairing request acknowledged. device_id=$deviceId sas=$sas")
+        return PairingSession(deviceId = deviceId, sas = sas)
     }
 
     private suspend fun findRefreshedDeviceTarget(original: Device): Device? {

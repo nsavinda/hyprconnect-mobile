@@ -3,7 +3,6 @@ package dev.hyprconnect.app.ui.pairing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -13,11 +12,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import dev.hyprconnect.app.ui.components.VerificationCodeDisplay
 import dev.hyprconnect.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -28,13 +27,13 @@ fun PairingScreen(
     onNavigateBack: () -> Unit,
     onPairingSuccess: () -> Unit
 ) {
-    val isPairing       by viewModel.isPairing.collectAsState()
-    val isSubmitting    by viewModel.isSubmitting.collectAsState()
-    val connectionReady by viewModel.connectionReady.collectAsState()
-    val error           by viewModel.error.collectAsState()
-    val isPaired        by viewModel.isPaired.collectAsState(initial = false)
-
-    var codeInput by remember { mutableStateOf("") }
+    val isPairing         by viewModel.isPairing.collectAsState()
+    val isSubmitting      by viewModel.isSubmitting.collectAsState()
+    val connectionReady   by viewModel.connectionReady.collectAsState()
+    val error             by viewModel.error.collectAsState()
+    val isPaired          by viewModel.isPaired.collectAsState(initial = false)
+    val sas               by viewModel.sas.collectAsState()
+    val waitingForDesktop by viewModel.waitingForDesktop.collectAsState()
 
     LaunchedEffect(deviceId) {
         if (deviceId.isNotEmpty()) viewModel.startPairing(deviceId)
@@ -44,12 +43,12 @@ fun PairingScreen(
     }
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "pair device",
+                        "Pair Device",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = HyprText
@@ -60,7 +59,7 @@ fun PairingScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = HyprSubtext1)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -84,7 +83,7 @@ fun PairingScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "pairing failed",
+                                "Pairing Failed",
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
@@ -103,12 +102,12 @@ fun PairingScreen(
                     Button(
                         onClick = { viewModel.startPairing(deviceId) },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = HyprSurface0,
+                            containerColor = HyprGlass,
                             contentColor = HyprText
                         ),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("try again", fontFamily = FontFamily.Monospace)
+                        Text("Try Again", fontFamily = FontFamily.Monospace)
                     }
                 }
 
@@ -121,7 +120,7 @@ fun PairingScreen(
                     )
                     Spacer(Modifier.height(20.dp))
                     Text(
-                        "connecting...",
+                        "Connecting...",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 14.sp,
                         color = HyprSubtext0
@@ -129,7 +128,6 @@ fun PairingScreen(
                 }
 
                 connectionReady -> {
-                    // Code input state
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
@@ -145,7 +143,7 @@ fun PairingScreen(
                         Spacer(Modifier.height(24.dp))
 
                         Text(
-                            "complete pairing",
+                            if (waitingForDesktop) "Waiting for Desktop" else "Verify Code",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
@@ -153,7 +151,10 @@ fun PairingScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "enter the 6-digit code shown on\nyour desktop terminal",
+                            if (waitingForDesktop)
+                                "Approve the Same Code on Your\nDesktop Terminal to Finish Pairing"
+                            else
+                                "Make Sure This Number Matches\nWhat Your Desktop Shows",
                             style = MaterialTheme.typography.bodySmall,
                             color = HyprSubtext0,
                             textAlign = TextAlign.Center,
@@ -162,70 +163,57 @@ fun PairingScreen(
 
                         Spacer(Modifier.height(32.dp))
 
-                        // Code input field — monospace styled
-                        OutlinedTextField(
-                            value = codeInput,
-                            onValueChange = { v ->
-                                if (v.length <= 6 && v.all { it.isDigit() }) codeInput = v
-                            },
-                            placeholder = {
-                                Text(
-                                    "______",
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 28.sp,
-                                    letterSpacing = 12.sp,
-                                    color = HyprSurface2
-                                )
-                            },
-                            textStyle = LocalTextStyle.current.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 28.sp,
-                                letterSpacing = 12.sp,
-                                color = HyprText,
-                                textAlign = TextAlign.Center
-                            ),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor   = HyprBlue,
-                                unfocusedBorderColor = HyprSurface2,
-                                cursorColor          = HyprBlue,
-                                focusedContainerColor   = HyprSurface0,
-                                unfocusedContainerColor = HyprSurface0
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
+                        // SAS display — same widget the desktop CLI text mirrors.
+                        sas?.let { code ->
+                            VerificationCodeDisplay(code = code)
+                        }
 
-                        Spacer(Modifier.height(24.dp))
+                        Spacer(Modifier.height(28.dp))
 
-                        Button(
-                            onClick = { viewModel.submitCode(codeInput) },
-                            enabled = codeInput.length == 6 && !isSubmitting,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = HyprBlue,
-                                contentColor   = HyprCrust,
-                                disabledContainerColor = HyprSurface1,
-                                disabledContentColor   = HyprOverlay0
-                            )
-                        ) {
-                            if (isSubmitting) {
+                        if (waitingForDesktop) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
                                     strokeWidth = 2.dp,
-                                    color = HyprCrust
+                                    color = HyprBlue
                                 )
-                                Spacer(Modifier.width(8.dp))
-                                Text("verifying...", fontFamily = FontFamily.Monospace)
-                            } else {
+                                Spacer(Modifier.width(10.dp))
                                 Text(
-                                    "complete pairing",
+                                    "Run on Desktop:  hyprconnect pair-approve",
                                     fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(vertical = 4.dp)
+                                    fontSize = 11.sp,
+                                    color = HyprSubtext0
                                 )
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.confirmMatch() },
+                                enabled = sas != null && !isSubmitting,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = HyprBlue,
+                                    contentColor   = HyprCrust,
+                                    disabledContainerColor = HyprSurface1,
+                                    disabledContentColor   = HyprOverlay0
+                                )
+                            ) {
+                                if (isSubmitting) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = HyprCrust
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Confirming…", fontFamily = FontFamily.Monospace)
+                                } else {
+                                    Text(
+                                        "Codes Match — Confirm",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -241,7 +229,7 @@ fun PairingScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = HyprSubtext1),
                 border = androidx.compose.foundation.BorderStroke(1.dp, HyprSurface2)
             ) {
-                Text("cancel", fontFamily = FontFamily.Monospace)
+                Text("Cancel", fontFamily = FontFamily.Monospace)
             }
         }
     }

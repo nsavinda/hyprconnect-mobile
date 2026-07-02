@@ -36,12 +36,12 @@ fun MediaControlScreen(
     val isPlaying = nowPlaying?.status?.lowercase() == "playing"
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "media control",
+                        "Media Control",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         color = HyprText
@@ -52,7 +52,7 @@ fun MediaControlScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = HyprSubtext1)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -70,7 +70,7 @@ fun MediaControlScreen(
                 modifier = Modifier
                     .size(200.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(HyprSurface0),
+                    .background(HyprGlass),
                 contentAlignment = Alignment.Center
             ) {
                 // Decorative rings
@@ -78,14 +78,14 @@ fun MediaControlScreen(
                     modifier = Modifier
                         .size(160.dp)
                         .clip(CircleShape)
-                        .background(HyprMantle),
+                        .background(HyprGlassDeep),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
                             .size(80.dp)
                             .clip(CircleShape)
-                            .background(HyprSurface1),
+                            .background(HyprGlassRaised),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -138,9 +138,9 @@ fun MediaControlScreen(
 
                 // Status badge
                 val statusText = when (nowPlaying!!.status.lowercase()) {
-                    "playing" -> "▶ playing"
-                    "paused"  -> "⏸ paused"
-                    else      -> "⏹ stopped"
+                    "playing" -> "▶ Playing"
+                    "paused"  -> "⏸ Paused"
+                    else      -> "⏹ Stopped"
                 }
                 val statusColor = when (nowPlaying!!.status.lowercase()) {
                     "playing" -> HyprGreen
@@ -162,7 +162,7 @@ fun MediaControlScreen(
                 }
             } else {
                 Text(
-                    "no media playing",
+                    "No Media Playing",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 14.sp,
                     color = HyprSubtext0
@@ -174,7 +174,9 @@ fun MediaControlScreen(
             // Transport controls
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+                colors = CardDefaults.cardColors(containerColor = HyprGlass),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
                 shape  = RoundedCornerShape(20.dp)
             ) {
                 Row(

@@ -5,9 +5,9 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,6 +16,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.hyprconnect.app.service.ClipboardMonitor
 import dev.hyprconnect.app.service.HyprConnectService
 import dev.hyprconnect.app.ui.navigation.NavGraph
+import dev.hyprconnect.app.ui.theme.HyprBackdropBrush
 import dev.hyprconnect.app.ui.theme.HyprConnectTheme
 import javax.inject.Inject
 
@@ -37,9 +38,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             HyprConnectTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(HyprBackdropBrush)
                 ) {
                     NavGraph(sharedUris = sharedUris)
                 }

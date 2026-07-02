@@ -36,3 +36,13 @@ val HyprBlueContainer   = Color(0xFF1a2744)
 val HyprMauveContainer  = Color(0xFF261b3a)
 val HyprTealContainer   = Color(0xFF0d2323)
 val HyprPinkContainer   = Color(0xFF3a0d18)
+
+// Glassmorphism palette: translucent fills + thin highlight borders that
+// sit over the gradient backdrop applied at the screen root.
+val HyprGlass         = Color(0x66313244)   // ~40% Surface0 — primary card fill
+val HyprGlassDeep     = Color(0x80181825)   // ~50% Mantle — top bars, dialogs
+val HyprGlassRaised   = Color(0x6645475a)   // ~40% Surface1 — emphasis surface
+val HyprGlassBorder   = Color(0x33cdd6f4)   // ~20% Text — subtle hairline edge
+val HyprGlassHighlight = Color(0x14ffffff)  // ~8% white — top inner glow
+val HyprBackdropTop    = Color(0xFF1e1e2e)  // gradient start (HyprBase)
+val HyprBackdropBottom = Color(0xFF11111b)  // gradient end (HyprCrust)

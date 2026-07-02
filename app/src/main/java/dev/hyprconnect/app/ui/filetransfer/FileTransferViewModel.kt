@@ -34,7 +34,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -130,16 +129,14 @@ class FileTransferViewModel @Inject constructor(
     // setting; in-flight uploads continue against the old semaphore.
     @Volatile private var gate: Semaphore = Semaphore(4)
 
-    // Priority-aware pending queue feeding a fixed pool of workers. Producers
+    // FIFO pending queue feeding a fixed pool of workers. Producers
     // (folder walk, file picker) submitPending() as files are discovered;
-    // workers pick the next task using the current priority policy. The walk
-    // does NOT wait to enumerate all files — workers start consuming as soon
-    // as the first file is enqueued.
+    // workers consume in arrival order. The walk does NOT wait to enumerate
+    // all files — workers start consuming as soon as the first file is
+    // enqueued.
     private val pendingMutex = Mutex()
-    private val pending = mutableListOf<PendingUpload>()
+    private val pending = ArrayDeque<PendingUpload>()
     private val pendingSignal = Channel<Unit>(Channel.UNLIMITED)
-    private val balanceCounter = AtomicInteger(0)
-    @Volatile private var currentPriority: String = "off"
     private val maxWorkers = 16
 
     val activeCount: StateFlow<Int> = _transfers
@@ -151,9 +148,6 @@ class FileTransferViewModel @Inject constructor(
             settingsRepository.maxConcurrentTransfers.collect { n ->
                 gate = Semaphore(n.coerceIn(1, 16))
             }
-        }
-        viewModelScope.launch {
-            settingsRepository.transferPriority.collect { currentPriority = it }
         }
         repeat(maxWorkers) {
             viewModelScope.launch(Dispatchers.IO) { workerLoop() }
@@ -174,25 +168,10 @@ class FileTransferViewModel @Inject constructor(
     private suspend fun nextPending(): PendingUpload {
         while (true) {
             val task = pendingMutex.withLock {
-                if (pending.isEmpty()) null else removeBest()
+                if (pending.isEmpty()) null else pending.removeFirst()
             }
             if (task != null) return task
             pendingSignal.receive()
-        }
-    }
-
-    private fun removeBest(): PendingUpload {
-        return when (currentPriority) {
-            "small" -> pending.removeAt(pending.indices.minBy { pending[it].fileSize })
-            "big" -> pending.removeAt(pending.indices.maxBy { pending[it].fileSize })
-            "balanced" -> {
-                val idx = if (balanceCounter.getAndIncrement() % 2 == 0)
-                    pending.indices.maxBy { pending[it].fileSize }
-                else
-                    pending.indices.minBy { pending[it].fileSize }
-                pending.removeAt(idx)
-            }
-            else -> pending.removeAt(0) // "off" — FIFO discovery order
         }
     }
 
@@ -315,7 +294,7 @@ class FileTransferViewModel @Inject constructor(
             }
 
             if (!client.isConnected.value) {
-                updateStatus(localId, "Not connected")
+                updateStatus(localId, "Not Connected")
                 return@launch
             }
 
@@ -419,7 +398,7 @@ class FileTransferViewModel @Inject constructor(
                         FinalizeOutcome.ERROR -> false
                         FinalizeOutcome.TIMEOUT -> {
                             updateProgress(localId, 1f, 0L)
-                            updateStatus(localId, "Completed (confirmation timeout)")
+                            updateStatus(localId, "Completed (Confirmation Timeout)")
                             true
                         }
                     }
@@ -428,7 +407,7 @@ class FileTransferViewModel @Inject constructor(
 
             if (checkCanceled(localId, batchId)) return
             if (!completed) {
-                updateStatus(localId, "Finalize failed")
+                updateStatus(localId, "Finalize Failed")
                 return
             }
 
@@ -493,7 +472,7 @@ class FileTransferViewModel @Inject constructor(
         }
 
         Log.w(TAG, "QUIC upload failed: ${result.error}, falling back to TCP")
-        updateStatus(localId, "QUIC failed, using TCP")
+        updateStatus(localId, "QUIC Failed, Using TCP")
         return false
     }
 
@@ -513,7 +492,7 @@ class FileTransferViewModel @Inject constructor(
 
         contentResolver.openInputStream(uri).use { input ->
             if (input == null) {
-                updateStatus(localId, "Cannot open file")
+                updateStatus(localId, "Cannot Open File")
                 return false
             }
 
@@ -527,7 +506,7 @@ class FileTransferViewModel @Inject constructor(
                 val encoded = Base64.encodeToString(buffer, 0, read, Base64.NO_WRAP)
                 val ok = sendChunk(transferId, offset, encoded)
                 if (!ok) {
-                    updateStatus(localId, "Chunk upload failed")
+                    updateStatus(localId, "Chunk Upload Failed")
                     return false
                 }
 

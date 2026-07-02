@@ -39,18 +39,18 @@ fun HomeScreen(
     }
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             // Custom Hyprland-style header
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(HyprMantle)
+                    .background(HyprGlassDeep)
                     .padding(horizontal = 20.dp, vertical = 20.dp)
             ) {
                 Column {
                     Text(
-                        text = "hyprconnect",
+                        text = "HyprConnect",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
                         fontSize = 22.sp,
@@ -58,7 +58,7 @@ fun HomeScreen(
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "wayland phone bridge",
+                        text = "Wayland Phone Bridge",
                         style = MaterialTheme.typography.labelSmall,
                         color = HyprSubtext0
                     )
@@ -99,7 +99,7 @@ fun HomeScreen(
         ) {
             if (pairedDevices.isNotEmpty()) {
                 item {
-                    SectionLabel("// paired devices")
+                    SectionLabel("// Paired Devices")
                 }
                 items(pairedDevices) { device ->
                     DeviceCard(
@@ -116,7 +116,7 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        SectionLabel("// discovered")
+                        SectionLabel("// Discovered")
                         if (isScanning) {
                             Box(
                                 modifier = Modifier
@@ -125,7 +125,7 @@ fun HomeScreen(
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    "scanning",
+                                    "Scanning",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = HyprBlue,
                                     fontFamily = FontFamily.Monospace
@@ -151,7 +151,7 @@ fun HomeScreen(
                                 )
                                 Spacer(Modifier.height(12.dp))
                                 Text(
-                                    "looking for devices...",
+                                    "Looking for Devices...",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HyprSubtext0,
                                     fontFamily = FontFamily.Monospace
@@ -182,7 +182,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .size(80.dp)
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(HyprSurface0),
+                                .background(HyprGlass),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -194,7 +194,7 @@ fun HomeScreen(
                         }
                         Spacer(Modifier.height(20.dp))
                         Text(
-                            "no devices found",
+                            "No Devices Found",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Medium,
                             color = HyprSubtext0,
@@ -202,7 +202,7 @@ fun HomeScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "tap scan to find your desktop",
+                            "Tap Scan to Find Your Desktop",
                             style = MaterialTheme.typography.bodySmall,
                             color = HyprOverlay0
                         )

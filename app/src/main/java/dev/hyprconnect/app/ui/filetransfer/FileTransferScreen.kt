@@ -1,7 +1,9 @@
 package dev.hyprconnect.app.ui.filetransfer
 
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -78,13 +80,13 @@ fun FileTransferScreen(
     }
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text(
-                            "file transfers",
+                            "File Transfers",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             color = HyprText
@@ -92,9 +94,9 @@ fun FileTransferScreen(
                         if (transfers.isNotEmpty()) {
                             val finished = activeCount == 0
                             val label = if (finished)
-                                "${transfers.size} done · took ${formatElapsed(overallElapsedMs)}"
+                                "${transfers.size} Done · Took ${formatElapsed(overallElapsedMs)}"
                             else
-                                "$activeCount active · elapsed ${formatElapsed(overallElapsedMs)}"
+                                "$activeCount Active · Elapsed ${formatElapsed(overallElapsedMs)}"
                             Text(
                                 label,
                                 fontFamily = FontFamily.Monospace,
@@ -109,7 +111,7 @@ fun FileTransferScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = HyprSubtext1)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -133,7 +135,7 @@ fun FileTransferScreen(
                             modifier = Modifier
                                 .size(72.dp)
                                 .clip(RoundedCornerShape(18.dp))
-                                .background(HyprSurface0),
+                                .background(HyprGlass),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -145,13 +147,13 @@ fun FileTransferScreen(
                         }
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "no active transfers",
+                            "No Active Transfers",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 14.sp,
                             color = HyprSubtext0
                         )
                         Text(
-                            "pick a file or folder above",
+                            "Pick a File or Folder Above",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = HyprOverlay0
@@ -210,7 +212,9 @@ private fun BatchCard(batch: FolderBatch, nowMs: Long, onCancel: () -> Unit) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = HyprSurface1),
+        colors = CardDefaults.cardColors(containerColor = HyprGlassRaised),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -249,7 +253,7 @@ private fun BatchCard(batch: FolderBatch, nowMs: Long, onCancel: () -> Unit) {
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "${batch.completedFiles}/${batch.totalFiles} files · " +
+                            text = "${batch.completedFiles}/${batch.totalFiles} Files · " +
                                 "${batch.transferredBytes.toHumanReadableSize()} / ${batch.totalSize.toHumanReadableSize()}",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
@@ -317,7 +321,7 @@ private fun BatchCard(batch: FolderBatch, nowMs: Long, onCancel: () -> Unit) {
                         Spacer(Modifier.width(1.dp))
                     }
                     Text(
-                        text = "elapsed ${formatElapsed(elapsedFrom(batch.startMs, batch.endMs, nowMs))}",
+                        text = "Elapsed ${formatElapsed(elapsedFrom(batch.startMs, batch.endMs, nowMs))}",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
                         color = HyprOverlay0
@@ -338,13 +342,13 @@ private fun PickerBar(onPickFiles: () -> Unit, onPickFolder: () -> Unit) {
     ) {
         PickerButton(
             icon = Icons.Default.InsertDriveFile,
-            label = "pick files",
+            label = "Pick Files",
             modifier = Modifier.weight(1f),
             onClick = onPickFiles
         )
         PickerButton(
             icon = Icons.Default.Folder,
-            label = "pick folder",
+            label = "Pick Folder",
             modifier = Modifier.weight(1f),
             onClick = onPickFolder
         )
@@ -359,8 +363,8 @@ private fun PickerButton(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = modifier,
-        color = HyprSurface0,
+        modifier = modifier.border(BorderStroke(0.5.dp, HyprGlassBorder), RoundedCornerShape(12.dp)),
+        color = HyprGlass,
         shape = RoundedCornerShape(12.dp),
         onClick = onClick
     ) {
@@ -392,7 +396,9 @@ private fun TransferCard(transfer: FileTransfer, nowMs: Long) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+        colors = CardDefaults.cardColors(containerColor = HyprGlass),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(0.5.dp, HyprGlassBorder),
         shape  = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -481,7 +487,7 @@ private fun TransferCard(transfer: FileTransfer, nowMs: Long) {
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = transfer.status.lowercase(),
+                    text = transfer.status,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     color = HyprSubtext0
@@ -498,7 +504,7 @@ private fun TransferCard(transfer: FileTransfer, nowMs: Long) {
                     }
                     showElapsed -> {
                         Text(
-                            text = "elapsed ${formatElapsed(elapsedFrom(transfer.startMs, transfer.endMs, nowMs))}",
+                            text = "Elapsed ${formatElapsed(elapsedFrom(transfer.startMs, transfer.endMs, nowMs))}",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = HyprOverlay0

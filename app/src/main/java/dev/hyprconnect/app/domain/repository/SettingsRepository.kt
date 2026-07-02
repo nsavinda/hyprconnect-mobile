@@ -11,7 +11,6 @@ interface SettingsRepository {
     val batteryReporting: Flow<Boolean>
     val quicTransfer: Flow<Boolean>
     val maxConcurrentTransfers: Flow<Int>
-    val transferPriority: Flow<String>
 
     suspend fun updateDeviceName(name: String)
     suspend fun setNotificationSync(enabled: Boolean)
@@ -21,6 +20,5 @@ interface SettingsRepository {
     suspend fun setBatteryReporting(enabled: Boolean)
     suspend fun setQuicTransfer(enabled: Boolean)
     suspend fun setMaxConcurrentTransfers(value: Int)
-    suspend fun setTransferPriority(value: String)
     suspend fun clearAllData()
 }

@@ -52,20 +52,20 @@ fun DeviceDetailScreen(
     }
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text(
-                            text = device?.name ?: "device",
+                            text = device?.name ?: "Device",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = HyprText
                         )
                         Text(
-                            text = "device details",
+                            text = "Device Details",
                             style = MaterialTheme.typography.labelSmall,
                             color = HyprSubtext0
                         )
@@ -76,7 +76,7 @@ fun DeviceDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = HyprSubtext1)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -95,7 +95,9 @@ fun DeviceDetailScreen(
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+                        colors = CardDefaults.cardColors(containerColor = HyprGlass),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
                         shape  = RoundedCornerShape(14.dp)
                     ) {
                         Row(
@@ -115,11 +117,11 @@ fun DeviceDetailScreen(
                                 Spacer(Modifier.width(10.dp))
                                 Text(
                                     text = when (dev.status) {
-                                        is DeviceStatus.Connected    -> "connected"
-                                        is DeviceStatus.Connecting   -> "connecting..."
-                                        is DeviceStatus.Pairing      -> "pairing..."
-                                        is DeviceStatus.Disconnected -> "disconnected"
-                                        is DeviceStatus.Error        -> "error"
+                                        is DeviceStatus.Connected    -> "Connected"
+                                        is DeviceStatus.Connecting   -> "Connecting..."
+                                        is DeviceStatus.Pairing      -> "Pairing..."
+                                        is DeviceStatus.Disconnected -> "Disconnected"
+                                        is DeviceStatus.Error        -> "Error"
                                     },
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 13.sp,
@@ -155,7 +157,7 @@ fun DeviceDetailScreen(
                 val plugins = dev.availablePlugins
                 if (plugins.isNotEmpty()) {
                     item {
-                        SectionLabel("// actions")
+                        SectionLabel("// Actions")
                     }
 
                     val actions = buildList {
@@ -188,7 +190,7 @@ fun DeviceDetailScreen(
 
                 // System controls
                 if (isConnected) {
-                    item { SectionLabel("// system controls") }
+                    item { SectionLabel("// System Controls") }
 
                     if (controlsError != null) {
                         item {
@@ -223,12 +225,12 @@ fun DeviceDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SectionLabel("// workspaces")
+                            SectionLabel("// Workspaces")
                             TextButton(
                                 onClick = { viewModel.loadWorkspaces() },
                                 colors = ButtonDefaults.textButtonColors(contentColor = HyprBlue)
                             ) {
-                                Text("refresh", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                Text("Refresh", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                             }
                         }
                     }
@@ -279,7 +281,7 @@ fun DeviceDetailScreen(
                         }
                     ) {
                         Text(
-                            if (isConnected) "disconnect" else "connect",
+                            if (isConnected) "Disconnect" else "Connect",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(vertical = 4.dp)
@@ -315,7 +317,9 @@ private fun HyprSliderCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(containerColor = HyprSurface0),
+        colors   = CardDefaults.cardColors(containerColor = HyprGlass),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
         shape    = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -328,7 +332,7 @@ private fun HyprSliderCard(
                     Icon(icon, null, Modifier.size(18.dp), tint = HyprBlue)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        title.lowercase(),
+                        title,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
                         color = HyprSubtext1
@@ -371,8 +375,10 @@ private fun WorkspaceCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) HyprBlueContainer else HyprSurface0
+            containerColor = if (isActive) HyprBlueContainer else HyprGlass
         ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -386,7 +392,7 @@ private fun WorkspaceCard(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (isActive) HyprBlue.copy(alpha = 0.2f) else HyprMantle),
+                    .background(if (isActive) HyprBlue.copy(alpha = 0.2f) else HyprGlassDeep),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -410,7 +416,7 @@ private fun WorkspaceCard(
                 )
                 Text(
                     text = buildString {
-                        append("$windows window${if (windows != 1) "s" else ""}")
+                        append("$windows Window${if (windows != 1) "s" else ""}")
                         if (!monitor.isNullOrBlank()) append(" · $monitor")
                     },
                     fontFamily = FontFamily.Monospace,
@@ -427,7 +433,7 @@ private fun WorkspaceCard(
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        "active",
+                        "Active",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
                         color = HyprBlue
@@ -449,7 +455,9 @@ fun ActionCard(
     Card(
         onClick = onClick,
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+        colors = CardDefaults.cardColors(containerColor = HyprGlass),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
         shape  = RoundedCornerShape(14.dp)
     ) {
         Column(
@@ -469,7 +477,7 @@ fun ActionCard(
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                label.lowercase(),
+                label,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
                 color = HyprSubtext1,

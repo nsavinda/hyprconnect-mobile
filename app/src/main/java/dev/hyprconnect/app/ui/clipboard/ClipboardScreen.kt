@@ -39,20 +39,20 @@ fun ClipboardScreen(
     val history by viewModel.history.collectAsState()
 
     Scaffold(
-        containerColor = HyprBase,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text(
-                            text = "clipboard",
+                            text = "Clipboard",
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = HyprText
                         )
                         Text(
-                            text = "sync history",
+                            text = "Sync History",
                             style = MaterialTheme.typography.labelSmall,
                             color = HyprSubtext0
                         )
@@ -63,7 +63,7 @@ fun ClipboardScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = HyprSubtext1)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprMantle)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = HyprGlassDeep)
             )
         }
     ) { padding ->
@@ -76,14 +76,14 @@ fun ClipboardScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "// no clipboard history yet",
+                        "// No Clipboard History Yet",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
                         color = HyprOverlay0
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "copy something on mobile or PC",
+                        "Copy Something on Mobile or PC",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
                         color = HyprOverlay0
@@ -101,7 +101,7 @@ fun ClipboardScreen(
             ) {
                 item {
                     Text(
-                        "// clipboard history",
+                        "// Clipboard History",
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
                         fontSize = 11.sp,
@@ -133,7 +133,9 @@ private fun ClipboardEntryCard(
     Card(
         onClick = onResend,
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = HyprSurface0),
+        colors = CardDefaults.cardColors(containerColor = HyprGlass),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, HyprGlassBorder),
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -174,7 +176,7 @@ private fun ClipboardEntryCard(
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (isLocal) "mobile" else "pc",
+                        text = if (isLocal) "Mobile" else "PC",
                         fontFamily = FontFamily.Monospace,
                         fontSize = 10.sp,
                         color = accentColor
@@ -210,10 +212,10 @@ private fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
     val seconds = diff / 1000
     return when {
-        seconds < 5    -> "just now"
-        seconds < 60   -> "${seconds}s ago"
-        seconds < 3600 -> "${seconds / 60}m ago"
-        seconds < 86400 -> "${seconds / 3600}h ago"
+        seconds < 5    -> "Just Now"
+        seconds < 60   -> "${seconds}s Ago"
+        seconds < 3600 -> "${seconds / 60}m Ago"
+        seconds < 86400 -> "${seconds / 3600}h Ago"
         else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
     }
 }
